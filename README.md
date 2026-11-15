@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="public/logo.png" alt="TGDrive logo" width="140" />
+</p>
+
 # TGDrive
 
 An encrypted, serverless drive that stores files in **your own private Telegram forum supergroup**. No backend, no database, no account to create — the browser talks MTProto directly to Telegram.
