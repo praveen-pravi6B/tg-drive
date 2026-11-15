@@ -2,7 +2,7 @@
 
 An encrypted, serverless drive that stores files in **your own private Telegram forum supergroup**. No backend, no database, no account to create — the browser talks MTProto directly to Telegram.
 
-> **Status: M0 · storage spike.** Login, group/topic provisioning, and an encrypted 200 MB round-trip are wired up in the **Spike lab** (`/debug`). The folder/file drive UI, index, vault, previews and trash are still to come. Treat this as a development build, not a backup product.
+> **Status: M0 complete (verified live).** Login, group/topic provisioning, and an encrypted 200 MB round-trip work end-to-end against a real account via the **Spike lab** (`/debug`). The vault, drive UI, index, previews and trash are still to come. Treat this as a development build, not a backup product.
 
 ---
 
@@ -153,7 +153,7 @@ The GitHub repo is ready for a later “Connect to Git” step: push the repo, t
 
 | Milestone | Scope |
 | --- | --- |
-| **M0** | MTProto login, group/topic lifecycle, encrypted chunk round-trip — *current* |
+| **M0** | MTProto login, group/topic lifecycle, encrypted chunk round-trip — **done** |
 | M1 | Passphrase-derived vault, master key wrap/unwrap, cross-device recovery |
 | M2 | Drive UI: folders ↔ topics, upload queue, chunk manifest |
 | M3 | Encrypted index snapshot + event log in `#index`, local IndexedDB cache, MiniSearch |
