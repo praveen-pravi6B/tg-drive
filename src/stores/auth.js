@@ -4,7 +4,7 @@ import { StringSession } from 'telegram/sessions'
 import QRCode from 'qrcode'
 import { appInfo, getApiCredentials, hasCredentials, setApiCredentials } from '@/lib/config'
 import { errorMessage, log } from '@/lib/logger'
-import { clearSession, loadSession, saveSession } from '@/lib/telegram/session'
+import { clearSession, hasStoredSession, loadSession, saveSession } from '@/lib/telegram/session'
 import { toBase64Url } from '@/lib/crypto/bytes'
 
 let tg = null
@@ -101,6 +101,7 @@ export const useAuthStore = defineStore('auth', {
   getters: {
     isAuthorized: (state) => state.status === 'authorized' && Boolean(state.me),
     hasCredentials: () => hasCredentials(),
+    hasStoredSession: () => hasStoredSession(),
     displayName: (state) => {
       if (!state.me) return ''
       return [state.me.firstName, state.me.lastName].filter(Boolean).join(' ') || state.me.username
@@ -137,7 +138,10 @@ export const useAuthStore = defineStore('auth', {
         else if (result?.buffer) blob = new Blob([result.buffer], { type: 'image/jpeg' })
         else if (result instanceof Uint8Array || result instanceof ArrayBuffer) {
           blob = new Blob([result], { type: 'image/jpeg' })
-        } else if (typeof Buffer !== 'undefined' && Buffer.isBuffer?.(result)) {
+        } else if (
+          typeof globalThis.Buffer !== 'undefined' &&
+          globalThis.Buffer.isBuffer?.(result)
+        ) {
           blob = new Blob([result], { type: 'image/jpeg' })
         }
         if (blob) this.photoUrl = URL.createObjectURL(blob)
@@ -146,15 +150,15 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
-    async init() {
-      if (tg && this.status !== 'error') return
+    async init({ force = false } = {}) {
+      if (initPromise) return initPromise
+      if (tg && this.status !== 'error' && !force) return
       if (tg) await disposeClient()
       if (!hasCredentials()) {
         this.status = 'no-credentials'
         this.credentialsSource = 'none'
         return
       }
-      if (initPromise) return initPromise
 
       initPromise = (async () => {
         this.status = 'connecting'
@@ -173,30 +177,75 @@ export const useAuthStore = defineStore('auth', {
 
           await ensureConnected()
           let authorized = false
+          let restoreError = null
           try {
             authorized = await tg.checkAuthorization()
           } catch (error) {
-            log('warn', 'auth', 'Stored session is no longer valid', error)
-            clearSession()
+            restoreError = error
+            log('warn', 'auth', 'Could not verify the stored session', error)
           }
 
           if (authorized) {
-            this.me = mapUser(await tg.getMe())
-            saveSession(tg.session.save())
-            this.status = 'authorized'
-            this.step = 'done'
-            log('info', 'auth', `Restored session for ${this.me.username || this.me.id}`)
-            this.loadPhoto().catch(() => {})
-          } else {
+            try {
+              this.me = mapUser(await tg.getMe())
+              saveSession(tg.session.save())
+              this.status = 'authorized'
+              this.step = 'done'
+              log('info', 'auth', `Restored session for ${this.me.username || this.me.id}`)
+              this.loadPhoto().catch(() => {})
+              return
+            } catch (error) {
+              restoreError = error
+              log('warn', 'auth', 'Session restored but profile fetch failed', error)
+            }
+          }
+
+          const code = restoreError?.errorMessage || ''
+          const revoked = [
+            'AUTH_KEY_UNREGISTERED',
+            'SESSION_REVOKED',
+            'USER_DEACTIVATED',
+            'USER_DEACTIVATED_BAN',
+            'SESSION_EXPIRED',
+          ].includes(code)
+
+          if (revoked) {
             clearSession()
             this.status = 'unauthorized'
             this.step = 'idle'
+            this.error = 'Your Telegram session expired. Please sign in again.'
+            return
           }
+
+          if (authorized === false && !restoreError) {
+            clearSession()
+            this.status = 'unauthorized'
+            this.step = 'idle'
+            return
+          }
+
+          // Keep the stored session for transient/network issues so refresh
+          // doesn't force a new login. The login view can retry restore.
+          await disposeClient()
+          this.status = 'unauthorized'
+          this.step = 'idle'
+          this.error = errorMessage(
+            restoreError || new Error('Could not restore your Telegram session'),
+          )
         } catch (error) {
           await disposeClient()
-          this.status = 'error'
-          this.error = errorMessage(error)
-          log('error', 'auth', 'Connection failed', error)
+          // If we had a saved session and this was a connection/setup failure,
+          // keep it so the user can retry instead of being forced to log in again.
+          if (saved) {
+            this.status = 'unauthorized'
+            this.step = 'idle'
+            this.error = errorMessage(error)
+            log('error', 'auth', 'Connection failed while restoring session', error)
+          } else {
+            this.status = 'error'
+            this.error = errorMessage(error)
+            log('error', 'auth', 'Connection failed', error)
+          }
         } finally {
           initPromise = null
         }
@@ -217,7 +266,14 @@ export const useAuthStore = defineStore('auth', {
       await disposeClient()
       clearSession()
       this.resetSessionState()
-      return this.init()
+      return this.init({ force: true })
+    },
+
+    async retryRestore() {
+      rejectSteps(new Error('Retry restore'))
+      await disposeClient()
+      this.resetSessionState()
+      return this.init({ force: true })
     },
 
     async startQrLogin() {

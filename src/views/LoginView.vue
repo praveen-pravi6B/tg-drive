@@ -13,6 +13,7 @@ import {
 } from '@lucide/vue'
 import { useAuthStore } from '@/stores/auth'
 import { appInfo } from '@/lib/config'
+import { hasStoredSession } from '@/lib/telegram/session'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppInput from '@/components/ui/AppInput.vue'
@@ -35,6 +36,19 @@ let clock = null
 
 const credsReady = computed(() => auth.credentialsSource !== 'none')
 const secondsLeft = computed(() => Math.max(0, Math.ceil((auth.qrExpires || 0) - now.value / 1000)))
+const storedSession = computed(() => hasStoredSession())
+const restoring = computed(
+  () => storedSession.value && ['idle', 'connecting'].includes(auth.status) && !auth.isAuthorized,
+)
+const restoreFailed = computed(
+  () =>
+    storedSession.value &&
+    !auth.isAuthorized &&
+    auth.status === 'unauthorized' &&
+    !['qr', 'qr-loading', 'phone', 'phone-connecting', 'code', 'password', 'signing-in'].includes(
+      auth.step,
+    ),
+)
 
 function nextTarget() {
   const next = typeof route.query.next === 'string' ? route.query.next : '/drive'
@@ -46,9 +60,23 @@ function goNext() {
 }
 
 async function beginQr() {
-  if (!credsReady.value || started.value) return
+  if (!credsReady.value || started.value || storedSession.value) return
   started.value = true
   await auth.startQrLogin()
+}
+
+async function retryRestore() {
+  started.value = false
+  phoneMode.value = false
+  await auth.retryRestore()
+  if (auth.isAuthorized) goNext()
+}
+
+async function signInFresh() {
+  started.value = false
+  phoneMode.value = false
+  await auth.restart()
+  await beginQr()
 }
 
 async function saveCredentials() {
@@ -136,17 +164,23 @@ onMounted(async () => {
     goNext()
     return
   }
-  await beginQr()
+  // If a session is stored, init() is responsible for restoring it; don't
+  // start QR login and force a re-login on transient failures.
+  if (!hasStoredSession()) await beginQr()
 })
 
 onUnmounted(() => clearInterval(clock))
 </script>
 
 <template>
-  <div class="mx-auto grid w-full max-w-6xl items-center gap-10 px-5 py-10 lg:grid-cols-[1.05fr_0.95fr] lg:py-16">
+  <div
+    class="mx-auto grid w-full max-w-6xl items-center gap-10 px-5 py-10 lg:grid-cols-[1.05fr_0.95fr] lg:py-16"
+  >
     <section class="space-y-8">
       <div class="space-y-4">
-        <div class="inline-flex items-center gap-2 rounded-full border border-sky-400/20 bg-sky-400/10 px-3 py-1 text-[11px] font-medium text-sky-300">
+        <div
+          class="inline-flex items-center gap-2 rounded-full border border-sky-400/20 bg-sky-400/10 px-3 py-1 text-[11px] font-medium text-sky-300"
+        >
           <ShieldCheck class="h-3.5 w-3.5" />
           Zero-knowledge · serverless
         </div>
@@ -166,9 +200,7 @@ onUnmounted(() => clearInterval(clock))
             <Lock class="h-3.5 w-3.5 text-sky-300" />
           </span>
           <div>
-            <div class="font-medium">
-              AES-256-GCM, per file
-            </div>
+            <div class="font-medium">AES-256-GCM, per file</div>
             <p class="text-xs text-muted-foreground">
               Every file gets its own key derived from a master key that never leaves the browser.
             </p>
@@ -179,9 +211,7 @@ onUnmounted(() => clearInterval(clock))
             <Smartphone class="h-3.5 w-3.5 text-sky-300" />
           </span>
           <div>
-            <div class="font-medium">
-              Sign in by scanning a code
-            </div>
+            <div class="font-medium">Sign in by scanning a code</div>
             <p class="text-xs text-muted-foreground">
               Standard Telegram MTProto login. Your session stays in this browser.
             </p>
@@ -192,9 +222,7 @@ onUnmounted(() => clearInterval(clock))
             <KeyRound class="h-3.5 w-3.5 text-sky-300" />
           </span>
           <div>
-            <div class="font-medium">
-              Recoverable on another device
-            </div>
+            <div class="font-medium">Recoverable on another device</div>
             <p class="text-xs text-muted-foreground">
               A passphrase unlocks an encrypted vault stored in the drive group itself.
             </p>
@@ -202,7 +230,9 @@ onUnmounted(() => clearInterval(clock))
         </li>
       </ul>
 
-      <div class="flex items-start gap-2.5 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3.5 text-xs text-amber-200/90">
+      <div
+        class="flex items-start gap-2.5 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3.5 text-xs text-amber-200/90"
+      >
         <AlertTriangle class="mt-0.5 h-4 w-4 shrink-0" />
         <p>
           This is an unofficial Telegram client and uses your account's storage. Keep volumes
@@ -217,10 +247,7 @@ onUnmounted(() => clearInterval(clock))
         title="Connect your Telegram app"
         description="One-time setup for this deployment"
       >
-        <form
-          class="space-y-4"
-          @submit.prevent="saveCredentials"
-        >
+        <form class="space-y-4" @submit.prevent="saveCredentials">
           <p class="text-xs leading-relaxed text-muted-foreground">
             Create an app at
             <a
@@ -228,7 +255,8 @@ onUnmounted(() => clearInterval(clock))
               href="https://my.telegram.org"
               target="_blank"
               rel="noreferrer noopener"
-            >my.telegram.org</a>
+              >my.telegram.org</a
+            >
             (API development tools) and copy the two values from <em>App configuration</em>.
           </p>
           <AppInput
@@ -244,17 +272,10 @@ onUnmounted(() => clearInterval(clock))
             placeholder="0123456789abcdef0123456789abcdef"
             mono
           />
-          <p
-            v-if="credentialsError"
-            class="text-xs text-destructive"
-          >
+          <p v-if="credentialsError" class="text-xs text-destructive">
             {{ credentialsError }}
           </p>
-          <AppButton
-            type="submit"
-            class="w-full"
-            :loading="auth.status === 'connecting'"
-          >
+          <AppButton type="submit" class="w-full" :loading="auth.status === 'connecting'">
             Save and continue
             <ArrowRight class="h-4 w-4" />
           </AppButton>
@@ -269,14 +290,8 @@ onUnmounted(() => clearInterval(clock))
         <template #header>
           <div class="flex items-center gap-3">
             <span class="grid h-9 w-9 place-items-center rounded-lg bg-sky-400/10 text-sky-300">
-              <QrCode
-                v-if="!phoneMode"
-                class="h-4 w-4"
-              />
-              <Smartphone
-                v-else
-                class="h-4 w-4"
-              />
+              <QrCode v-if="!phoneMode" class="h-4 w-4" />
+              <Smartphone v-else class="h-4 w-4" />
             </span>
             <div>
               <h2 class="text-sm font-semibold">
@@ -295,60 +310,73 @@ onUnmounted(() => clearInterval(clock))
 
         <div class="space-y-4">
           <div
-            v-if="auth.error"
+            v-if="auth.error && !restoreFailed"
             class="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-red-300"
           >
             <AlertTriangle class="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>{{ auth.error }}</span>
           </div>
 
-          <!-- QR flow -->
-          <template v-if="!phoneMode">
+          <div v-if="restoreFailed" class="space-y-4 py-2">
             <div
-              v-if="auth.step === 'password'"
-              class="space-y-3"
+              class="flex items-start gap-2 rounded-lg border border-amber-400/20 bg-amber-400/[0.06] p-3 text-xs text-amber-200/90"
             >
+              <AlertTriangle class="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>{{
+                auth.error ||
+                'Could not restore your Telegram session. Your saved login is still on this device.'
+              }}</span>
+            </div>
+            <p class="text-xs text-muted-foreground">
+              This can happen after a refresh if the connection was interrupted. You can try again
+              without signing in again.
+            </p>
+            <div class="flex flex-wrap gap-2">
+              <AppButton :loading="auth.status === 'connecting'" @click="retryRestore">
+                <RefreshCw class="h-4 w-4" />
+                Retry restore
+              </AppButton>
+              <AppButton variant="ghost" @click="signInFresh">
+                Sign in with a different account
+              </AppButton>
+            </div>
+          </div>
+
+          <div v-else-if="restoring" class="flex flex-col items-center gap-3 py-10">
+            <RefreshCw class="h-6 w-6 animate-spin text-sky-300" />
+            <p class="text-sm font-medium">Restoring your session…</p>
+            <p class="text-center text-xs text-muted-foreground">
+              Reconnecting to Telegram so you don’t have to sign in again.
+            </p>
+          </div>
+
+          <!-- QR flow -->
+          <template v-else-if="!phoneMode">
+            <div v-if="auth.step === 'password'" class="space-y-3">
               <p class="text-xs text-muted-foreground">
                 Two-step verification is enabled on this account.
                 <span v-if="auth.passwordHint">Hint: “{{ auth.passwordHint }}”</span>
               </p>
-              <form
-                class="space-y-3"
-                @submit.prevent="submitPassword"
-              >
+              <form class="space-y-3" @submit.prevent="submitPassword">
                 <AppInput
                   v-model="password"
                   type="password"
                   label="Password"
                   autocomplete="current-password"
                 />
-                <AppButton
-                  type="submit"
-                  class="w-full"
-                  :loading="auth.step === 'signing-in'"
-                >
+                <AppButton type="submit" class="w-full" :loading="auth.step === 'signing-in'">
                   Unlock and sign in
                 </AppButton>
               </form>
             </div>
 
-            <div
-              v-else-if="auth.step === 'qr' && auth.qrUrl"
-              class="space-y-3"
-            >
+            <div v-else-if="auth.step === 'qr' && auth.qrUrl" class="space-y-3">
               <div class="mx-auto w-fit rounded-2xl bg-white p-3 shadow-glow">
-                <img
-                  :src="auth.qrUrl"
-                  alt="Telegram login QR code"
-                  class="h-56 w-56"
-                >
+                <img :src="auth.qrUrl" alt="Telegram login QR code" class="h-56 w-56" />
               </div>
               <div class="flex items-center justify-center gap-2 text-[11px] text-muted-foreground">
                 <span v-if="secondsLeft > 0">Refreshes in {{ secondsLeft }}s</span>
-                <span
-                  v-else
-                  class="flex items-center gap-1 text-sky-300"
-                >
+                <span v-else class="flex items-center gap-1 text-sky-300">
                   <RefreshCw class="h-3 w-3 animate-spin" />
                   Getting a fresh code…
                 </span>
@@ -364,35 +392,20 @@ onUnmounted(() => clearInterval(clock))
               class="flex flex-col items-center gap-3 py-8"
             >
               <RefreshCw class="h-6 w-6 animate-spin text-sky-300" />
-              <p class="text-xs text-muted-foreground">
-                Signing in…
-              </p>
+              <p class="text-xs text-muted-foreground">Signing in…</p>
             </div>
 
-            <div
-              v-else
-              class="flex flex-col items-center gap-3 py-8"
-            >
+            <div v-else class="flex flex-col items-center gap-3 py-8">
               <RefreshCw class="h-6 w-6 animate-spin text-sky-300" />
-              <p class="text-xs text-muted-foreground">
-                Requesting a login code from Telegram…
-              </p>
+              <p class="text-xs text-muted-foreground">Requesting a login code from Telegram…</p>
             </div>
 
             <div class="flex items-center justify-between border-t border-white/5 pt-3">
-              <AppButton
-                variant="ghost"
-                size="sm"
-                @click="switchToPhone"
-              >
+              <AppButton variant="ghost" size="sm" @click="switchToPhone">
                 <Smartphone class="h-3.5 w-3.5" />
                 Use phone number
               </AppButton>
-              <AppButton
-                variant="ghost"
-                size="sm"
-                @click="refreshQr"
-              >
+              <AppButton variant="ghost" size="sm" @click="refreshQr">
                 <RefreshCw class="h-3.5 w-3.5" />
                 New QR
               </AppButton>
@@ -400,7 +413,7 @@ onUnmounted(() => clearInterval(clock))
           </template>
 
           <!-- Phone flow -->
-          <template v-else>
+          <template v-else-if="phoneMode">
             <form
               v-if="!['code', 'password', 'signing-in'].includes(auth.step)"
               class="space-y-3"
@@ -414,20 +427,12 @@ onUnmounted(() => clearInterval(clock))
                 autocomplete="tel"
                 :error="phoneError"
               />
-              <AppButton
-                type="submit"
-                class="w-full"
-                :loading="auth.step === 'phone-connecting'"
-              >
+              <AppButton type="submit" class="w-full" :loading="auth.step === 'phone-connecting'">
                 Send code
               </AppButton>
             </form>
 
-            <form
-              v-else-if="auth.step === 'code'"
-              class="space-y-3"
-              @submit.prevent="submitCode"
-            >
+            <form v-else-if="auth.step === 'code'" class="space-y-3" @submit.prevent="submitCode">
               <p class="text-xs text-muted-foreground">
                 Enter the code Telegram sent you
                 {{ auth.codeViaApp ? 'in the Telegram app' : 'by SMS' }}.
@@ -439,11 +444,7 @@ onUnmounted(() => clearInterval(clock))
                 autocomplete="one-time-code"
                 mono
               />
-              <AppButton
-                type="submit"
-                class="w-full"
-                :loading="auth.step === 'signing-in'"
-              >
+              <AppButton type="submit" class="w-full" :loading="auth.step === 'signing-in'">
                 Continue
               </AppButton>
             </form>
@@ -463,31 +464,18 @@ onUnmounted(() => clearInterval(clock))
                 label="Password"
                 autocomplete="current-password"
               />
-              <AppButton
-                type="submit"
-                class="w-full"
-                :loading="auth.step === 'signing-in'"
-              >
+              <AppButton type="submit" class="w-full" :loading="auth.step === 'signing-in'">
                 Unlock and sign in
               </AppButton>
             </form>
 
-            <div
-              v-else
-              class="flex flex-col items-center gap-3 py-8"
-            >
+            <div v-else class="flex flex-col items-center gap-3 py-8">
               <RefreshCw class="h-6 w-6 animate-spin text-sky-300" />
-              <p class="text-xs text-muted-foreground">
-                Signing in…
-              </p>
+              <p class="text-xs text-muted-foreground">Signing in…</p>
             </div>
 
             <div class="flex items-center justify-between border-t border-white/5 pt-3">
-              <AppButton
-                variant="ghost"
-                size="sm"
-                @click="switchToQr"
-              >
+              <AppButton variant="ghost" size="sm" @click="switchToQr">
                 <QrCode class="h-3.5 w-3.5" />
                 Use QR code
               </AppButton>

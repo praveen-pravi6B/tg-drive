@@ -33,7 +33,6 @@ import { useVaultStore } from '@/stores/vault'
 import { MIN_PASSPHRASE_LENGTH } from '@/lib/vault/vault'
 import { formatBytes } from '@/lib/utils'
 import { limits } from '@/lib/config'
-import AppBadge from '@/components/ui/AppBadge.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppInput from '@/components/ui/AppInput.vue'
@@ -158,7 +157,6 @@ function scheduleThumbs() {
   thumbTimer = setTimeout(async () => {
     const items = (drive.files || []).filter((item) => canThumb(item) && !thumbUrls.value[item.id])
     for (const item of items.slice(0, 12)) {
-      // eslint-disable-next-line no-await-in-loop
       await ensureThumb(item)
     }
   }, 150)
@@ -355,6 +353,22 @@ async function createFolder() {
   }
 }
 
+async function deleteCurrentFolder() {
+  const folder = drive.selectedFolder
+  if (!folder) return
+  const count = drive.files.length
+  const ok = window.confirm(
+    `Delete folder "${folder.title}"?\n\nThis removes the folder topic and its files from Telegram. (${count} file(s) in the current index)`,
+  )
+  if (!ok) return
+  actionError.value = ''
+  try {
+    await drive.deleteFolder(folder.id)
+  } catch (error) {
+    actionError.value = error.message
+  }
+}
+
 function pickFile() {
   newMenuOpen.value = false
   fileInput.value?.click()
@@ -496,9 +510,20 @@ onBeforeUnmount(() => {
     <section class="min-w-0 flex-1 space-y-5">
       <div class="flex flex-wrap items-center gap-3">
         <div class="min-w-0">
-          <h1 class="truncate text-lg font-semibold tracking-tight">
-            {{ drive.selectedFolder?.title || 'My Drive' }}
-          </h1>
+          <div class="flex items-center gap-2">
+            <h1 class="truncate text-lg font-semibold tracking-tight">
+              {{ drive.selectedFolder?.title || 'My Drive' }}
+            </h1>
+            <button
+              v-if="drive.selectedFolder"
+              type="button"
+              class="rounded-md p-1.5 text-muted-foreground hover:bg-red-500/10 hover:text-red-300"
+              title="Delete folder"
+              @click="deleteCurrentFolder"
+            >
+              <Trash2 class="h-4 w-4" />
+            </button>
+          </div>
           <p class="text-xs text-muted-foreground">
             {{ drive.files.length }} items · encrypted on this device
           </p>
@@ -597,10 +622,10 @@ onBeforeUnmount(() => {
           @keydown.enter.prevent="createFolder"
           @keydown.esc="showNewFolder = false"
         />
-        <AppButton size="sm" :loading="drive.creatingFolder" @click="createFolder"
-          >Create</AppButton
-        >
-        <AppButton size="sm" variant="ghost" @click="showNewFolder = false">Cancel</AppButton>
+        <AppButton size="sm" :loading="drive.creatingFolder" @click="createFolder">
+          Create
+        </AppButton>
+        <AppButton size="sm" variant="ghost" @click="showNewFolder = false"> Cancel </AppButton>
         <span v-if="folderError" class="text-xs text-red-300">{{ folderError }}</span>
       </div>
 
@@ -647,11 +672,12 @@ onBeforeUnmount(() => {
                   size="sm"
                   variant="outline"
                   @click="drive.cancelUpload()"
-                  >Cancel</AppButton
                 >
-                <AppButton v-else size="sm" variant="ghost" @click="drive.clearUpload()"
-                  >Dismiss</AppButton
-                >
+                  Cancel
+                </AppButton>
+                <AppButton v-else size="sm" variant="ghost" @click="drive.clearUpload()">
+                  Dismiss
+                </AppButton>
               </div>
             </div>
           </div>
@@ -713,7 +739,9 @@ onBeforeUnmount(() => {
                 </span>
               </button>
               <div class="p-2.5">
-                <div class="truncate text-sm font-medium" :title="item.name">{{ item.name }}</div>
+                <div class="truncate text-sm font-medium" :title="item.name">
+                  {{ item.name }}
+                </div>
                 <div class="mt-0.5 text-[11px] text-muted-foreground">
                   {{ formatDate(item.createdAt) }}
                 </div>
@@ -755,7 +783,9 @@ onBeforeUnmount(() => {
                 </span>
               </button>
               <button type="button" class="min-w-0 flex-1 text-left" @click="openItem(item)">
-                <div class="truncate text-sm font-medium">{{ item.name }}</div>
+                <div class="truncate text-sm font-medium">
+                  {{ item.name }}
+                </div>
                 <div class="text-[11px] text-muted-foreground">
                   {{ formatBytes(item.size) }} · {{ formatDate(item.createdAt) }}
                 </div>
@@ -777,7 +807,9 @@ onBeforeUnmount(() => {
         title="Could not open the vault"
         description="Telegram or the drive group returned an error"
       >
-        <p class="text-sm text-red-200">{{ vault.error || 'Unknown error' }}</p>
+        <p class="text-sm text-red-200">
+          {{ vault.error || 'Unknown error' }}
+        </p>
         <AppButton class="mt-4" variant="outline" @click="vault.init({ force: true })">
           <RefreshCw class="h-4 w-4" />
           Try again
@@ -908,12 +940,12 @@ onBeforeUnmount(() => {
         class="mt-3 h-10 w-full rounded-lg border border-input bg-background/60 px-3 text-sm focus-ring"
       />
       <div class="mt-4 flex justify-end gap-2">
-        <AppButton type="button" variant="ghost" size="sm" @click="renameTarget = null"
-          >Cancel</AppButton
-        >
-        <AppButton type="submit" size="sm" :loading="busyFileId === renameTarget?.id"
-          >Save</AppButton
-        >
+        <AppButton type="button" variant="ghost" size="sm" @click="renameTarget = null">
+          Cancel
+        </AppButton>
+        <AppButton type="submit" size="sm" :loading="busyFileId === renameTarget?.id">
+          Save
+        </AppButton>
       </div>
     </form>
   </div>
@@ -927,8 +959,12 @@ onBeforeUnmount(() => {
   >
     <div class="flex items-center gap-3 border-b border-white/10 px-4 py-3">
       <div class="min-w-0 flex-1">
-        <div class="truncate text-sm font-medium text-white">{{ preview.item?.name }}</div>
-        <div class="text-[11px] text-white/60">{{ formatBytes(preview.item?.size || 0) }}</div>
+        <div class="truncate text-sm font-medium text-white">
+          {{ preview.item?.name }}
+        </div>
+        <div class="text-[11px] text-white/60">
+          {{ formatBytes(preview.item?.size || 0) }}
+        </div>
       </div>
       <div class="flex items-center gap-1">
         <button
@@ -984,8 +1020,8 @@ onBeforeUnmount(() => {
         :src="preview.url"
         :alt="preview.item?.name"
         class="max-h-full max-w-full object-contain"
-        @contextmenu.prevent
         draggable="false"
+        @contextmenu.prevent
       />
 
       <div

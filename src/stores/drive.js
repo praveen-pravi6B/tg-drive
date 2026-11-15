@@ -3,7 +3,7 @@ import { useAuthStore } from './auth'
 import { useVaultStore, getMasterKey } from './vault'
 import { errorMessage, log } from '@/lib/logger'
 import { readIndexBlob, writeIndexBlob } from '@/lib/telegram/drive'
-import { createTopic, listTopics } from '@/lib/telegram/topics'
+import { createTopic, deleteTopic, listTopics } from '@/lib/telegram/topics'
 import {
   deleteFile,
   downloadFile,
@@ -230,7 +230,10 @@ export const useDriveStore = defineStore('drive', {
       try {
         const topic = await createTopic(client, channel, title)
         if (topic?.id) {
-          this.folders = sortFolders([...this.folders, normalizeFolder({ id: topic.id, title: topic.title || title })])
+          this.folders = sortFolders([
+            ...this.folders,
+            normalizeFolder({ id: topic.id, title: topic.title || title }),
+          ])
           this.selectedTopicId = topic.id
           this.syncSelectedFiles()
           await this.saveIndex()
@@ -413,6 +416,30 @@ export const useDriveStore = defineStore('drive', {
       this.allFiles = this.allFiles.filter((file) => file.id !== manifest.id)
       this.syncSelectedFiles()
       await this.saveIndex()
+    },
+
+    async deleteFolder(topicId) {
+      const folderId = Number(topicId)
+      if (!folderId) throw new Error('No folder selected')
+      const { client, channel } = this.requireReady()
+
+      // Remove files in this folder from the encrypted index state.
+      this.allFiles = this.allFiles.filter((file) => Number(file.folderTopicId) !== folderId)
+      this.folders = this.folders.filter((folder) => folder.id !== folderId)
+
+      if (this.selectedTopicId === folderId) {
+        this.selectedTopicId = this.folders[0]?.id || 0
+      }
+      this.syncSelectedFiles()
+      await this.saveIndex()
+
+      try {
+        await deleteTopic(client, channel, folderId)
+        log('info', 'drive', `Deleted folder/topic ${folderId}`)
+      } catch (error) {
+        log('error', 'drive', 'Could not delete folder topic on Telegram', error)
+        throw error
+      }
     },
   },
 })
