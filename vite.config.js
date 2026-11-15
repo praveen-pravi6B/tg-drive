@@ -24,7 +24,7 @@ export default defineConfig({
     global: 'globalThis',
   },
   optimizeDeps: {
-    include: ['telegram', 'buffer', 'process/browser'],
+    include: ['telegram', 'buffer'],
   },
   build: {
     target: 'es2022',
