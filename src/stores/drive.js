@@ -24,6 +24,30 @@ function queueSave(task) {
   return saveChain
 }
 
+function isGeneralFolder(folder) {
+  const title = String(folder?.title || '')
+    .trim()
+    .toLowerCase()
+  return title === 'general' || Number(folder?.id) === 1
+}
+
+function normalizeFolder(folder) {
+  const id = Number(folder.id)
+  const rawTitle = String(folder.title || '').trim() || 'Untitled folder'
+  const title = isGeneralFolder({ id, title: rawTitle }) ? 'Home' : rawTitle
+  return { id, title }
+}
+
+function sortFolders(folders) {
+  return [...folders].sort((a, b) => {
+    const ag = a.title === 'Home'
+    const bg = b.title === 'Home'
+    if (ag && !bg) return -1
+    if (!ag && bg) return 1
+    return a.title.localeCompare(b.title)
+  })
+}
+
 export const useDriveStore = defineStore('drive', {
   state: () => ({
     status: 'idle', // idle | loading | ready | error
@@ -94,10 +118,11 @@ export const useDriveStore = defineStore('drive', {
     applySnapshot(snapshot) {
       const folders = Array.isArray(snapshot?.folders) ? snapshot.folders : []
       const files = Array.isArray(snapshot?.files) ? snapshot.files : []
-      this.folders = folders
-        .filter((folder) => folder?.id && !isReservedTopicTitle(folder.title))
-        .map((folder) => ({ id: Number(folder.id), title: folder.title || 'Untitled folder' }))
-        .sort((a, b) => a.title.localeCompare(b.title))
+      this.folders = sortFolders(
+        folders
+          .filter((folder) => folder?.id && !isReservedTopicTitle(folder.title))
+          .map((folder) => normalizeFolder(folder)),
+      )
       this.allFiles = files.filter((file) => file?.id)
       this.indexLoaded = true
 
@@ -168,10 +193,11 @@ export const useDriveStore = defineStore('drive', {
         const snapshot = await this.loadIndex()
         if (!snapshot) {
           const topics = await listTopics(client, channel, { limit: 100 })
-          this.folders = topics
-            .filter((topic) => topic.id && !isReservedTopicTitle(topic.title))
-            .map((topic) => ({ id: topic.id, title: topic.title || 'Untitled folder' }))
-            .sort((a, b) => a.title.localeCompare(b.title))
+          this.folders = sortFolders(
+            topics
+              .filter((topic) => topic.id && !isReservedTopicTitle(topic.title))
+              .map((topic) => normalizeFolder(topic)),
+          )
 
           if (this.selectedTopicId && !this.folders.some((f) => f.id === this.selectedTopicId)) {
             this.selectedTopicId = 0
@@ -204,8 +230,7 @@ export const useDriveStore = defineStore('drive', {
       try {
         const topic = await createTopic(client, channel, title)
         if (topic?.id) {
-          this.folders.push({ id: topic.id, title: topic.title || title })
-          this.folders.sort((a, b) => a.title.localeCompare(b.title))
+          this.folders = sortFolders([...this.folders, normalizeFolder({ id: topic.id, title: topic.title || title })])
           this.selectedTopicId = topic.id
           this.syncSelectedFiles()
           await this.saveIndex()
