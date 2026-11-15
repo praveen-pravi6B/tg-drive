@@ -68,6 +68,7 @@ export const useDriveStore = defineStore('drive', {
     uploadTask: null, // { fileName, fileId, progress, stage, error, done, chunksDone, chunkCount, running }
     batchTask: null, // { mode, total, done, current, running, error }
     uploadQueueCount: 0,
+    events: [],
   }),
 
   getters: {
@@ -84,6 +85,13 @@ export const useDriveStore = defineStore('drive', {
   },
 
   actions: {
+    appendEvent(type, data = {}) {
+      const event = { type, at: new Date().toISOString(), ...data }
+      const list = Array.isArray(this.events) ? this.events : []
+      list.push(event)
+      this.events = list.length > 200 ? list.slice(-200) : list
+    },
+
     reset() {
       if (uploadAbort) uploadAbort.abort()
       uploadAbort = null
@@ -140,12 +148,14 @@ export const useDriveStore = defineStore('drive', {
     applySnapshot(snapshot) {
       const folders = Array.isArray(snapshot?.folders) ? snapshot.folders : []
       const files = Array.isArray(snapshot?.files) ? snapshot.files : []
+      const events = Array.isArray(snapshot?.events) ? snapshot.events : []
       this.folders = sortFolders(
         folders
           .filter((folder) => folder?.id && !isReservedTopicTitle(folder.title))
           .map((folder) => normalizeFolder(folder)),
       )
       this.allFiles = files.filter((file) => file?.id)
+      this.events = events.slice(-200)
       this.indexLoaded = true
 
       if (this.selectedTopicId && !this.folders.some((f) => f.id === this.selectedTopicId)) {
@@ -267,6 +277,7 @@ export const useDriveStore = defineStore('drive', {
             snapshot: {
               folders: this.folders,
               files: this.allFiles,
+              events: Array.isArray(this.events) ? this.events.slice(-200) : [],
             },
           })
           const message = await writeIndexBlob(client, channel, vault.indexTopicId, encrypted)
@@ -339,6 +350,10 @@ export const useDriveStore = defineStore('drive', {
           ])
           this.selectedTopicId = topic.id
           this.syncSelectedFiles()
+          this.appendEvent('folder.create', {
+            folderTopicId: topic.id,
+            title: topic.title || title,
+          })
           await this.saveIndex()
         }
         log('info', 'drive', `Created folder "${title}"`)
@@ -452,6 +467,10 @@ export const useDriveStore = defineStore('drive', {
         })
         this.allFiles = [manifest, ...this.allFiles.filter((item) => item.id !== manifest.id)]
         this.syncSelectedFiles()
+        this.appendEvent('file.upload', {
+          fileId: manifest.id,
+          folderTopicId: manifest.folderTopicId,
+        })
         await this.saveIndex()
         const completed = this.uploadTask
         setTimeout(() => {
@@ -570,6 +589,7 @@ export const useDriveStore = defineStore('drive', {
         file.id === manifest.id ? { ...file, ...updated } : file,
       )
       this.syncSelectedFiles()
+      this.appendEvent('file.rename', { fileId: manifest.id })
       await this.saveIndex()
       return updated
     },
@@ -587,6 +607,7 @@ export const useDriveStore = defineStore('drive', {
           : file,
       )
       this.syncSelectedFiles()
+      this.appendEvent('file.trash', { fileId: manifest.id })
       await this.saveIndex()
     },
 
@@ -601,6 +622,7 @@ export const useDriveStore = defineStore('drive', {
           : file,
       )
       this.syncSelectedFiles()
+      this.appendEvent('file.restore', { fileId: manifest.id })
       await this.saveIndex()
     },
 
@@ -610,6 +632,7 @@ export const useDriveStore = defineStore('drive', {
       await deleteFile({ client, channel, manifest })
       this.allFiles = this.allFiles.filter((file) => file.id !== manifest.id)
       this.syncSelectedFiles()
+      this.appendEvent('file.delete', { fileId: manifest.id })
       await this.saveIndex()
     },
 
@@ -669,6 +692,7 @@ export const useDriveStore = defineStore('drive', {
         this.selectedTopicId = this.folders[0]?.id || 0
       }
       this.syncSelectedFiles()
+      this.appendEvent('folder.delete', { folderTopicId: folderId })
       await this.saveIndex()
 
       try {
@@ -694,6 +718,7 @@ export const useDriveStore = defineStore('drive', {
         ),
       )
       this.syncSelectedFiles()
+      this.appendEvent('folder.rename', { folderTopicId: folderId, title })
       await this.saveIndex()
       log('info', 'drive', `Renamed folder ${folderId} to "${title}"`)
     },

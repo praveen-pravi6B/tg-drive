@@ -17,16 +17,19 @@ export function indexAad(driveId) {
 }
 
 export function emptySnapshot(driveId = '') {
-  return { v: INDEX_VERSION, driveId, updatedAt: '', folders: [], files: [] }
+  return { v: INDEX_VERSION, driveId, updatedAt: '', folders: [], files: [], events: [] }
 }
 
 export async function sealSnapshot({ masterKey, driveId, snapshot }) {
   if (!masterKey) throw new Error('Vault is locked')
   const rawKey = await deriveNamedKeyBytes(masterKey, 'index-v1')
   const key = await importAesKey(rawKey)
+  const base = emptySnapshot(driveId)
+  const events = Array.isArray(snapshot?.events) ? snapshot.events : base.events
   const payload = {
-    ...emptySnapshot(driveId),
+    ...base,
     ...snapshot,
+    events,
     v: INDEX_VERSION,
     driveId,
     updatedAt: new Date().toISOString(),
@@ -50,5 +53,6 @@ export async function openSnapshot({ masterKey, driveId, blob }) {
   if (driveId && snapshot.driveId && snapshot.driveId !== driveId) {
     throw new Error('Index belongs to a different drive')
   }
+  if (!Array.isArray(snapshot.events)) snapshot.events = []
   return snapshot
 }

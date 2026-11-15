@@ -2,7 +2,7 @@
 
 An encrypted, serverless drive that stores files in **your own private Telegram forum supergroup**. No backend, no database, no account to create — the browser talks MTProto directly to Telegram.
 
-> **Status: M3 in progress.** Vault recovery (M1), a basic drive UI (M2), and an encrypted drive index snapshot in `#index` are in place. Folders map to topics, uploads are chunked/encrypted with vault-derived keys, manifests are stored per file, and the index snapshot caches folder/file metadata for faster loading. Local IndexedDB caching now includes the encrypted index snapshot (fast load/fallback) and decrypted media blobs (1-day cache), and previews/grid-list/search+category filter (including global search across folders via MiniSearch)/multi-select/copy-cut-paste/queued uploads/trash with 30-day retention are available. Event log and resumable/retry-heavy uploads are still to come. Treat this as a development build, not a backup product.
+> **Status: M3 in progress.** Vault recovery (M1), a basic drive UI (M2), and an encrypted drive index snapshot in `#index` are in place. Folders map to topics, uploads are chunked/encrypted with vault-derived keys, manifests are stored per file, and the index snapshot caches folder/file metadata for faster loading. Local IndexedDB caching now includes the encrypted index snapshot (fast load/fallback) and decrypted media blobs (1-day cache), and previews/grid-list/search+category filter (including global search across folders via MiniSearch)/multi-select/copy-cut-paste/queued uploads/trash with 30-day retention are available. A lightweight encrypted event trail is stored in the index snapshot; full append-only event log and resumable-across-refresh uploads are still to come. Treat this as a development build, not a backup product.
 
 ---
 
@@ -202,7 +202,7 @@ The GitHub repo is ready for a later “Connect to Git” step: push the repo, t
 
 - Drive index snapshot is implemented (`i.bin` in `#index`) and locally cached in IndexedDB (encrypted snapshot) for faster load/fallback, but there is no event log or MiniSearch yet.
 - File listing may still scan a folder’s manifests on first visit/migration and then persist them into the snapshot.
-- In-folder and global file search (MiniSearch, "All folders") with category filtering are available. Uploads/downloads include automatic flood-wait handling and per-chunk retry for resilience, but no resumable-across-refresh uploads or event log yet. Trash (soft delete, restore, permanent delete, empty trash, 30-day auto-purge) is supported.
+- In-folder and global file search (MiniSearch, "All folders") with category filtering are available. Uploads/downloads include automatic flood-wait handling and per-chunk retry for resilience. A lightweight event trail is persisted in the encrypted index snapshot, but there is no full append-only event log or resumable-across-refresh uploads yet. Trash (soft delete, restore, permanent delete, empty trash, 30-day auto-purge) is supported.
 - The M0 spike lab still uses its own ephemeral keys/path; normal uploads go through the vault-derived file keys.
 - Losing the vault passphrase means the drive cannot be recovered.
 - Clearing browser storage loses the session and local caches; the drive and vault are re-discovered from Telegram after signing in again.
