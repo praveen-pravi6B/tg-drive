@@ -69,14 +69,6 @@ const ready = computed(() => vault.status === 'unlocked')
 const needsVault = computed(() => ['no-vault', 'locked'].includes(vault.status))
 const checking = computed(() => ['idle', 'checking'].includes(vault.status))
 
-const vaultBadge = computed(() => {
-  if (vault.status === 'unlocked') return { tone: 'success', label: 'Unlocked' }
-  if (vault.status === 'locked') return { tone: 'warning', label: 'Locked' }
-  if (vault.status === 'no-vault') return { tone: 'info', label: 'No vault' }
-  if (vault.status === 'error') return { tone: 'danger', label: 'Error' }
-  return { tone: 'neutral', label: 'Checking' }
-})
-
 const previewableInFolder = computed(() => drive.files.filter((f) => isPreviewable(f)))
 
 function isPreviewable(item) {
@@ -269,8 +261,8 @@ function onGlobalKey(e) {
     newMenuOpen.value = false
     renameTarget.value = null
   }
-  if (preview.value?.kind === 'video') {
-    if (e.key === ' ' && e.target?.tagName !== 'INPUT') {
+  if (preview.value) {
+    if (preview.value.kind === 'video' && e.key === ' ' && e.target?.tagName !== 'INPUT' && e.target?.tagName !== 'TEXTAREA') {
       e.preventDefault()
       togglePlay()
     }
@@ -482,15 +474,6 @@ onBeforeUnmount(() => {
           Unlock the vault to see folders.
         </p>
       </div>
-
-      <RouterLink
-        to="/vault"
-        class="flex items-center gap-2 rounded-xl border border-white/5 bg-white/[0.02] p-3 text-xs text-muted-foreground hover:bg-white/[0.04]"
-      >
-        <KeyRound class="h-3.5 w-3.5" />
-        Vault
-        <AppBadge :tone="vaultBadge.tone" class="ml-auto">{{ vaultBadge.label }}</AppBadge>
-      </RouterLink>
     </aside>
 
     <section class="min-w-0 flex-1 space-y-5">

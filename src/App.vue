@@ -1,8 +1,8 @@
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { useOnline } from '@vueuse/core'
-import { Cloud, HardDrive, KeyRound, LogOut, Terminal, WifiOff } from '@lucide/vue'
+import { Cloud, HardDrive, KeyRound, Lock, LogOut, Terminal, User, WifiOff } from '@lucide/vue'
 import { useAuthStore } from '@/stores/auth'
 import { useDriveStore } from '@/stores/drive'
 import { useVaultStore } from '@/stores/vault'
@@ -14,6 +14,7 @@ const vault = useVaultStore()
 const route = useRoute()
 const router = useRouter()
 const online = useOnline()
+const profileOpen = ref(false)
 
 const initials = computed(() => {
   const name = auth.displayName || auth.me?.username || ''
@@ -27,15 +28,29 @@ const initials = computed(() => {
 
 const showShellNav = computed(() => auth.isAuthorized)
 
+function lockVault() {
+  vault.lock()
+}
+
 async function signOut() {
+  profileOpen.value = false
   drive.reset()
   vault.reset()
   await auth.logout()
   router.replace({ name: 'login' })
 }
 
+function closeProfile() {
+  profileOpen.value = false
+}
+
 onMounted(() => {
   if (auth.status === 'idle') auth.init()
+  window.addEventListener('click', closeProfile)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('click', closeProfile)
 })
 </script>
 
@@ -58,11 +73,6 @@ onMounted(() => {
             <Cloud class="h-4 w-4" />
           </span>
           <span class="text-sm font-semibold tracking-tight">TGDrive</span>
-          <span
-            class="hidden rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-muted-foreground sm:inline"
-          >
-            M1
-          </span>
         </RouterLink>
 
         <nav v-if="showShellNav" class="ml-4 flex items-center gap-1">
@@ -75,14 +85,6 @@ onMounted(() => {
             Drive
           </RouterLink>
           <RouterLink
-            to="/vault"
-            class="focus-ring flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
-            :class="route.name === 'vault' && 'bg-white/5 text-foreground'"
-          >
-            <KeyRound class="h-3.5 w-3.5" />
-            Vault
-          </RouterLink>
-          <RouterLink
             to="/debug"
             class="focus-ring flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
             :class="route.name === 'debug' && 'bg-white/5 text-foreground'"
@@ -93,23 +95,81 @@ onMounted(() => {
         </nav>
 
         <div class="ml-auto flex items-center gap-2">
-          <div v-if="auth.isAuthorized" class="hidden items-center gap-2 sm:flex">
-            <span
-              class="grid h-7 w-7 place-items-center rounded-full bg-accent text-[11px] font-semibold text-accent-foreground"
+          <div v-if="auth.isAuthorized" class="relative flex items-center gap-1.5">
+            <AppButton
+              v-if="vault.isUnlocked"
+              variant="ghost"
+              size="icon"
+              title="Lock vault"
+              @click.stop="lockVault"
             >
-              {{ initials || 'TG' }}
-            </span>
-            <div class="leading-tight">
-              <div class="max-w-[140px] truncate text-xs font-medium">
-                {{ auth.displayName }}
+              <Lock class="h-4 w-4" />
+            </AppButton>
+
+            <button
+              type="button"
+              class="flex items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-white/5 focus-ring"
+              @click.stop="profileOpen = !profileOpen"
+            >
+              <span
+                class="grid h-7 w-7 overflow-hidden place-items-center rounded-full bg-accent text-[11px] font-semibold text-accent-foreground"
+              >
+                <img v-if="auth.photoUrl" :src="auth.photoUrl" alt="" class="h-full w-full object-cover" >
+                <template v-else>{{ initials || 'TG' }}</template>
+              </span>
+              <div class="hidden leading-tight text-left sm:block">
+                <div class="max-w-[140px] truncate text-xs font-medium">
+                  {{ auth.displayName }}
+                </div>
               </div>
-              <div class="max-w-[140px] truncate text-[10px] text-muted-foreground">
-                {{ auth.me?.username ? `@${auth.me.username}` : auth.me?.id }}
+            </button>
+
+            <div
+              v-if="profileOpen"
+              class="absolute right-0 top-full z-40 mt-2 w-64 overflow-hidden rounded-xl border border-white/10 bg-background/95 p-3 shadow-xl backdrop-blur"
+              @click.stop
+            >
+              <div class="flex items-center gap-3">
+                <span
+                  class="grid h-10 w-10 overflow-hidden place-items-center rounded-full bg-accent text-sm font-semibold text-accent-foreground"
+                >
+                  <img v-if="auth.photoUrl" :src="auth.photoUrl" alt="" class="h-full w-full object-cover" >
+                  <template v-else>{{ initials || 'TG' }}</template>
+                </span>
+                <div class="min-w-0">
+                  <div class="truncate text-sm font-medium">{{ auth.displayName || 'Telegram user' }}</div>
+                  <div class="truncate text-xs text-muted-foreground">
+                    {{ auth.me?.username ? `@${auth.me.username}` : auth.me?.id || '—' }}
+                  </div>
+                </div>
+              </div>
+              <div class="mt-3 space-y-1 border-t border-white/5 pt-3 text-xs">
+                <div class="flex items-center justify-between text-muted-foreground">
+                  <span>Vault</span>
+                  <span :class="vault.isUnlocked ? 'text-emerald-300' : 'text-amber-300'">
+                    {{ vault.isUnlocked ? 'Unlocked' : vault.status === 'no-vault' ? 'Not set up' : 'Locked' }}
+                  </span>
+                </div>
+              </div>
+              <div class="mt-3 flex flex-col gap-1 border-t border-white/5 pt-2">
+                <RouterLink
+                  to="/vault"
+                  class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-white/5"
+                  @click="profileOpen = false"
+                >
+                  <KeyRound class="h-3.5 w-3.5" />
+                  Manage vault
+                </RouterLink>
+                <button
+                  type="button"
+                  class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-red-300 hover:bg-red-500/10"
+                  @click="signOut"
+                >
+                  <LogOut class="h-3.5 w-3.5" />
+                  Sign out
+                </button>
               </div>
             </div>
-            <AppButton variant="ghost" size="icon" title="Sign out" @click="signOut">
-              <LogOut class="h-4 w-4" />
-            </AppButton>
           </div>
           <RouterLink v-else-if="route.name !== 'login'" to="/login">
             <AppButton size="sm">Sign in</AppButton>

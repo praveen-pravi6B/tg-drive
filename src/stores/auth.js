@@ -88,6 +88,7 @@ export const useAuthStore = defineStore('auth', {
     step: 'idle',
     error: '',
     me: null,
+    photoUrl: '',
     qrUrl: '',
     qrExpires: 0,
     phone: '',
@@ -108,14 +109,41 @@ export const useAuthStore = defineStore('auth', {
 
   actions: {
     resetSessionState() {
+      if (this.photoUrl) {
+        try {
+          URL.revokeObjectURL(this.photoUrl)
+        } catch {
+          /* ignore */
+        }
+      }
       this.status = 'idle'
       this.step = 'idle'
       this.error = ''
       this.me = null
+      this.photoUrl = ''
       this.qrUrl = ''
       this.qrExpires = 0
       this.passwordHint = ''
       this.lastErrorCode = ''
+    },
+
+    async loadPhoto() {
+      if (!tg || !this.me || this.photoUrl) return
+      try {
+        const result = await tg.downloadProfilePhoto('me', { isBig: false })
+        if (!result) return
+        let blob = null
+        if (result instanceof Blob) blob = result
+        else if (result?.buffer) blob = new Blob([result.buffer], { type: 'image/jpeg' })
+        else if (result instanceof Uint8Array || result instanceof ArrayBuffer) {
+          blob = new Blob([result], { type: 'image/jpeg' })
+        } else if (typeof Buffer !== 'undefined' && Buffer.isBuffer?.(result)) {
+          blob = new Blob([result], { type: 'image/jpeg' })
+        }
+        if (blob) this.photoUrl = URL.createObjectURL(blob)
+      } catch {
+        /* photo is optional */
+      }
     },
 
     async init() {
@@ -158,6 +186,7 @@ export const useAuthStore = defineStore('auth', {
             this.status = 'authorized'
             this.step = 'done'
             log('info', 'auth', `Restored session for ${this.me.username || this.me.id}`)
+            this.loadPhoto().catch(() => {})
           } else {
             clearSession()
             this.status = 'unauthorized'
@@ -309,6 +338,7 @@ export const useAuthStore = defineStore('auth', {
       this.qrUrl = ''
       this.error = ''
       log('info', 'auth', `Signed in as ${this.me.username || this.me.id}`)
+      this.loadPhoto().catch(() => {})
     },
 
     async cancelLogin() {
