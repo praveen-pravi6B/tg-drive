@@ -310,6 +310,10 @@ export const useDriveStore = defineStore('drive', {
         this.allFiles = [manifest, ...this.allFiles.filter((item) => item.id !== manifest.id)]
         this.syncSelectedFiles()
         await this.saveIndex()
+        const completed = this.uploadTask
+        setTimeout(() => {
+          if (this.uploadTask === completed && completed?.done) this.uploadTask = null
+        }, 2000)
         return manifest
       } catch (error) {
         if (this.uploadTask) {
