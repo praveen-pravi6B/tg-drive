@@ -13,6 +13,7 @@ import {
   uploadFile,
 } from '@/lib/drive/files'
 import { openSnapshot, sealSnapshot } from '@/lib/drive/index'
+import { getCachedBlob, pruneExpiredBlobs, putCachedBlob } from '@/lib/drive/mediaCache'
 import { limits } from '@/lib/config'
 
 let uploadAbort = null
@@ -340,8 +341,13 @@ export const useDriveStore = defineStore('drive', {
     },
 
     async fetchBlob(manifest) {
+      pruneExpiredBlobs().catch(() => {})
+      const cached = await getCachedBlob(manifest)
+      if (cached) return cached
+
       const { client, channel, masterKey } = this.requireReady()
       const { blob } = await downloadFile({ client, channel, manifest, masterKey })
+      putCachedBlob(manifest, blob).catch(() => {})
       return blob
     },
 
@@ -368,7 +374,9 @@ export const useDriveStore = defineStore('drive', {
         newName,
         masterKey,
       })
-      this.allFiles = this.allFiles.map((file) => (file.id === manifest.id ? { ...file, ...updated } : file))
+      this.allFiles = this.allFiles.map((file) =>
+        file.id === manifest.id ? { ...file, ...updated } : file,
+      )
       this.syncSelectedFiles()
       await this.saveIndex()
       return updated
