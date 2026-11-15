@@ -15,6 +15,11 @@ const routes = [
     component: () => import('@/views/DriveView.vue'),
   },
   {
+    path: '/vault',
+    name: 'vault',
+    component: () => import('@/views/VaultView.vue'),
+  },
+  {
     path: '/debug',
     name: 'debug',
     component: () => import('@/views/DebugView.vue'),

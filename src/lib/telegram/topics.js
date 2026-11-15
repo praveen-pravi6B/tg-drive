@@ -73,7 +73,9 @@ export async function createDriveGroup(client, { title, driveId }) {
       forum: true,
     }),
   )
-  const channel = (created.chats || []).find((chat) => chat.megagroup || chat.className === 'Channel')
+  const channel = (created.chats || []).find(
+    (chat) => chat.megagroup || chat.className === 'Channel',
+  )
   if (!channel) throw new Error('Telegram did not return the created supergroup')
 
   const result = { channel: serializeChannel(channel), archived: false, forwardsDisabled: false }
@@ -123,16 +125,31 @@ export async function getChannelFull(client, channel) {
   }
 }
 
-export async function findDriveGroup(client, driveId, { limit = 100 } = {}) {
-  const marker = `${appInfo.aboutPrefix}${driveId}`
-  const dialogs = await client.getDialogs({ limit })
+export async function findDriveGroup(client, driveId = null, { limit = 100 } = {}) {
+  const marker = driveId ? `${appInfo.aboutPrefix}${driveId}` : appInfo.aboutPrefix
+  const dialogs = []
+  // The drive group is archived on purpose, so both folders must be scanned.
+  for (const archived of [false, true]) {
+    try {
+      dialogs.push(...(await client.getDialogs({ limit, archived })))
+    } catch {
+      /* one folder may be unavailable; keep the other */
+    }
+  }
 
+  const seen = new Set()
   for (const dialog of dialogs) {
     const entity = dialog.entity
     if (!entity || entity.className !== 'Channel' || !entity.megagroup) continue
+    if (seen.has(String(entity.id))) continue
+    seen.add(String(entity.id))
     try {
       const full = await getChannelFull(client, serializeChannel(entity))
-      if (full.about.startsWith(marker)) return full
+      if (full.about.startsWith(marker)) {
+        const parsed =
+          driveId || full.about.slice(appInfo.aboutPrefix.length).trim().split(/\s+/)[0]
+        return { ...full, driveId: parsed || '' }
+      }
     } catch {
       /* skip inaccessible chats */
     }

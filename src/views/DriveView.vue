@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
 import {
   ArrowRight,
@@ -8,11 +8,13 @@ import {
   FolderClosed,
   HardDrive,
   Image,
+  KeyRound,
   Music,
   Terminal,
   Video,
 } from '@lucide/vue'
 import { useAuthStore } from '@/stores/auth'
+import { useVaultStore } from '@/stores/vault'
 import { formatBytes, shortId } from '@/lib/utils'
 import { limits, storageKeys } from '@/lib/config'
 import AppBadge from '@/components/ui/AppBadge.vue'
@@ -20,14 +22,36 @@ import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 
 const auth = useAuthStore()
+const vault = useVaultStore()
 
-const group = (() => {
+// Fall back to the M0 spike lab pointer until the vault store has resolved.
+const legacyGroup = (() => {
   try {
     return JSON.parse(localStorage.getItem(storageKeys.debugGroup) || 'null')
   } catch {
     return null
   }
 })()
+
+const group = computed(() => vault.group || legacyGroup)
+
+const vaultBadge = computed(() => {
+  if (vault.status === 'unlocked') return { tone: 'success', label: 'Vault unlocked' }
+  if (vault.status === 'locked') return { tone: 'warning', label: 'Vault locked' }
+  if (vault.status === 'no-vault') return { tone: 'info', label: 'No vault yet' }
+  if (vault.status === 'error') return { tone: 'danger', label: 'Vault error' }
+  return { tone: 'neutral', label: 'Checking vault' }
+})
+
+const vaultLine = computed(() => {
+  if (vault.status === 'unlocked') return 'Master key is in memory for this tab'
+  if (vault.status === 'locked') return 'Unlock with your passphrase to derive file keys'
+  if (vault.status === 'no-vault') return 'Create a passphrase to start your encrypted drive'
+  if (vault.status === 'error') return vault.error || 'Could not read the vault'
+  return 'Resolving the drive group and #index topic'
+})
+
+const vaultAction = computed(() => (vault.status === 'no-vault' ? 'Create vault' : 'Open vault'))
 
 const folders = [
   { name: 'Photos', icon: Image, count: '—' },
@@ -39,6 +63,10 @@ const folders = [
 const accountLine = computed(() =>
   auth.me?.username ? `@${auth.me.username}` : auth.me?.id || 'not connected',
 )
+
+onMounted(() => {
+  vault.init()
+})
 </script>
 
 <template>
@@ -54,6 +82,18 @@ const accountLine = computed(() =>
         >
           <HardDrive class="h-4 w-4 text-sky-300" />
           My Drive
+        </RouterLink>
+        <RouterLink
+          to="/vault"
+          class="flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+        >
+          <KeyRound class="h-4 w-4" />
+          Vault
+          <span class="ml-auto text-[10px]">
+            {{
+              vault.status === 'unlocked' ? 'open' : vault.status === 'no-vault' ? 'new' : 'locked'
+            }}
+          </span>
         </RouterLink>
       </div>
 
@@ -105,7 +145,7 @@ const accountLine = computed(() =>
               tone="info"
               dot
             >
-              M0 storage spike
+              M1 vault
             </AppBadge>
           </div>
           <p class="text-xs text-muted-foreground">
@@ -172,30 +212,55 @@ const accountLine = computed(() =>
             </div>
           </div>
           <div class="rounded-lg border border-white/5 bg-white/[0.02] p-3">
+            <div class="flex items-center justify-between gap-2">
+              <div class="text-[10px] uppercase tracking-wider text-muted-foreground">
+                Vault
+              </div>
+              <AppBadge :tone="vaultBadge.tone">
+                {{ vaultBadge.label }}
+              </AppBadge>
+            </div>
+            <div class="mt-1 text-sm font-medium">
+              <RouterLink
+                to="/vault"
+                class="text-sky-300 hover:underline"
+              >
+                {{ vaultAction }}
+              </RouterLink>
+            </div>
+            <div class="text-[11px] text-muted-foreground">
+              {{ vaultLine }}
+            </div>
+          </div>
+          <div class="rounded-lg border border-white/5 bg-white/[0.02] p-3">
             <div class="text-[10px] uppercase tracking-wider text-muted-foreground">
               Index
             </div>
             <div class="mt-1 text-sm font-medium">
-              Not built yet
+              {{ vault.indexTopicId ? '#index topic ready' : 'Not built yet' }}
             </div>
             <div class="text-[11px] text-muted-foreground">
-              M5 · snapshot + event log
+              M5 · file index on top of this topic
             </div>
           </div>
         </div>
       </AppCard>
 
-      <div class="rounded-xl border border-dashed border-white/10 bg-white/[0.015] px-6 py-12 text-center">
-        <span class="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-sky-400/10 text-sky-300">
+      <div
+        class="rounded-xl border border-dashed border-white/10 bg-white/[0.015] px-6 py-12 text-center"
+      >
+        <span
+          class="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-sky-400/10 text-sky-300"
+        >
           <Terminal class="h-5 w-5" />
         </span>
         <h2 class="mt-4 text-sm font-semibold">
           The drive UI is intentionally empty
         </h2>
         <p class="mx-auto mt-1 max-w-md text-xs leading-relaxed text-muted-foreground">
-          Folder and file screens are wired after the storage primitives are proven. The spike lab
-          already exercises group creation, topic posting, encrypted chunk upload, download and
-          hash verification against your real account.
+          Folder and file screens are wired after the storage primitives are proven. The vault now
+          seals a master key in Telegram, and the spike lab still exercises group creation, topic
+          posting, encrypted chunk upload, download and hash verification against your real account.
         </p>
         <RouterLink
           to="/debug"

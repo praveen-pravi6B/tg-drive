@@ -2,7 +2,7 @@
 
 An encrypted, serverless drive that stores files in **your own private Telegram forum supergroup**. No backend, no database, no account to create — the browser talks MTProto directly to Telegram.
 
-> **Status: M0 complete (verified live).** Login, group/topic provisioning, and an encrypted 200 MB round-trip work end-to-end against a real account via the **Spike lab** (`/debug`). The vault, drive UI, index, previews and trash are still to come. Treat this as a development build, not a backup product.
+> **Status: M1 complete.** The vault is implemented: a passphrase-derived Argon2id key wraps a random master key, and only the wrapped key is stored in the reserved `#index` topic. Login, group/topic provisioning, and an encrypted 200 MB round-trip remain verified live via the **Spike lab** (`/debug`). The drive UI, file index, previews and trash are still to come. Treat this as a development build, not a backup product.
 
 ---
 
@@ -23,18 +23,21 @@ Browser (Vue 3 + GramJS, MTProto over WSS)
 - **No plaintext metadata.** Chunk file names are opaque IDs (`f_…-0001.bin`). File names, MIME types, folders metadata and the search index are designed to live in an encrypted vault/index, not in Telegram messages.
 - **Session stays in this browser.** The MTProto session string is kept in `localStorage`; signing out revokes it.
 
-### Planned key model
+### Key model
 
-| Item | Plan |
-| --- | --- |
-| Master key | 32 random bytes, generated once per drive |
-| Per-file key | `HKDF-SHA-256(master, "file-v1:<fileId>")` |
-| Chunk format | `nonce (12 B) ‖ AES-256-GCM ciphertext+tag` |
-| Vault | master key wrapped by an Argon2id KEK derived from a passphrase |
-| Vault location | encrypted blob in the reserved `#index` topic (cross-device recovery) |
-| Trash | reserved `#trash` topic, 30-day retention |
+| Item           | Implementation                                                              |
+| -------------- | --------------------------------------------------------------------------- |
+| Master key     | 32 random bytes, generated once per drive, never stored unwrapped           |
+| Per-file key   | `HKDF-SHA-256(master, "file-v1:<fileId>")`                                  |
+| Chunk format   | `nonce (12 B) ‖ AES-256-GCM ciphertext+tag`, AAD `fileId:index:count`       |
+| Vault          | master key wrapped by an Argon2id KEK derived from a passphrase             |
+| Vault envelope | AES-256-GCM, AAD bound to `tgdrive:vault-v1:1:<driveId>`                    |
+| Vault location | one opaque `v.bin` document (caption `tgv1`) in the reserved `#index` topic |
+| Trash          | reserved `#trash` topic, 30-day retention (planned)                         |
 
-The M0 spike uses ephemeral keys only — there is **no recovery yet**, so do not put anything important through it.
+Argon2id defaults are 64 MiB, 3 passes and a 16-byte random salt; parameters live in the envelope, so they can be raised later without breaking existing vaults. Rewriting the vault replaces the previous envelope and deletes it, so `#index` holds exactly one.
+
+The M0 spike lab still uses ephemeral keys for its round-trip; the vault is what makes files recoverable across reloads and devices.
 
 ---
 
@@ -44,7 +47,7 @@ Read these before connecting a real account:
 
 1. **`api_id` / `api_hash` are public in the bundle.** A browser-only MTProto app cannot hide them. Create a dedicated app at [my.telegram.org](https://my.telegram.org) for TGDrive; do not reuse the credentials of another client.
 2. **A session string grants full account access.** It is stored in `localStorage` on this device. Avoid shared/borrowed machines, and use **Sign out** when done. Anyone with the string can act as you until it is revoked in Telegram → Settings → Devices.
-3. **Telegram still sees traffic metadata.** It sees encrypted blobs, their sizes, timing, and the forum topic (folder) they land in. It does not see plaintext file contents or file names (once the vault/index lands).
+3. **Telegram still sees traffic metadata.** It sees encrypted blobs, their sizes, timing, and the forum topic (folder) they land in. It does not see plaintext file contents or file names (once the file index lands).
 4. **This is an unofficial client.** Automating a user account can violate Telegram's terms and trigger rate limits or restrictions, especially with repeated large uploads on a new account. Use a spare account while developing.
 5. **Not a backup.** Telegram can restrict, delete or lose data. Keep another copy of anything you care about.
 
@@ -79,16 +82,31 @@ Open the printed URL, scan the QR code with **Telegram → Settings → Devices 
 
 ### Scripts
 
-| Command | What it does |
-| --- | --- |
-| `npm run dev` | Vite dev server on `:5173` |
-| `npm run build` | Production build into `dist/` |
-| `npm run preview` | Serve the production build |
-| `npm run lint` | ESLint (flat config, Vue + JS) |
-| `npm run format` | Prettier |
-| `npm run smoke` | Build, then headless-Chrome checks: login renders, route guard redirects, no fatal console errors |
+| Command           | What it does                                                                                      |
+| ----------------- | ------------------------------------------------------------------------------------------------- |
+| `npm run dev`     | Vite dev server on `:5173`                                                                        |
+| `npm run build`   | Production build into `dist/`                                                                     |
+| `npm run preview` | Serve the production build                                                                        |
+| `npm run lint`    | ESLint (flat config, Vue + JS)                                                                    |
+| `npm run format`  | Prettier                                                                                          |
+| `npm run smoke`   | Build, then headless-Chrome checks: login renders, route guard redirects, no fatal console errors |
 
 The smoke test is hermetic: it maps `*.telegram.org` to localhost so it never touches the real network.
+
+---
+
+## Vault (`/vault`)
+
+The vault is the recovery layer. It is created once per drive and can be opened from any device signed into the same Telegram account.
+
+1. **Create** — choose a passphrase (12+ characters). A random 256-bit master key is generated, wrapped with an Argon2id-derived KEK, and uploaded as `v.bin` into `#index`. The raw key exists only in memory.
+2. **Unlock** — the envelope is downloaded from Telegram, the KEK is re-derived from the passphrase, and the GCM tag proves the passphrase and drive id. Wrong passphrases fail without leaking anything.
+3. **Lock** — drops the master key from memory. A page reload always starts locked.
+4. **Forget this device** — clears local pointers only. The group, topics, vault and every chunk stay in Telegram; signing in again re-discovers the drive by its `tgdrive:` marker.
+
+The envelope is plaintext JSON containing only public parameters (`v`, `driveId`, KDF settings, salt, timestamps) and the base64 wrapped key. Passphrases and raw keys never leave the browser.
+
+**There is no recovery.** If the passphrase is lost, the wrapped key cannot be opened and the files are unreadable.
 
 ---
 
@@ -119,11 +137,15 @@ src/
     crypto/bytes.js       base64/hex/random helpers
     crypto/kdf.js         HKDF, Argon2id/PBKDF2 KEKs, AES-GCM
     crypto/chunk.js       worker-backed encrypt/decrypt/SHA-256
+    vault/format.js       vault envelope + reserved names
+    vault/vault.js        create / rewrap / unlock (Argon2id + AES-GCM)
     telegram/session.js   session string persistence
     telegram/topics.js    group, forum topic, message, upload helpers
+    telegram/drive.js     drive discovery + vault read/write in #index
     telegram/roundtrip.js M0 encrypt → upload → download → verify pipeline
   stores/auth.js          GramJS client lifecycle, QR/phone auth
-  views/                  Login, Drive (placeholder), Spike lab, 404
+  stores/vault.js         vault lifecycle; master key in module scope only
+  views/                  Login, Drive (placeholder), Vault, Spike lab, 404
   components/ui/          small Tailwind UI primitives
   workers/crypto.worker.js WebCrypto worker (keys never leave the device)
 ```
@@ -151,20 +173,22 @@ The GitHub repo is ready for a later “Connect to Git” step: push the repo, t
 
 ## Roadmap
 
-| Milestone | Scope |
-| --- | --- |
-| **M0** | MTProto login, group/topic lifecycle, encrypted chunk round-trip — **done** |
-| M1 | Passphrase-derived vault, master key wrap/unwrap, cross-device recovery |
-| M2 | Drive UI: folders ↔ topics, upload queue, chunk manifest |
-| M3 | Encrypted index snapshot + event log in `#index`, local IndexedDB cache, MiniSearch |
-| M4 | Search/filter by category (images/video/audio/documents), retry/resume, flood handling |
-| M5 | Previews ≤50 MB, trash + 30-day retention, download/export |
-| M6 | Polish: PWA/offline shell, themes, keyboard shortcuts, storage stats |
+| Milestone | Scope                                                                                  |
+| --------- | -------------------------------------------------------------------------------------- |
+| **M0**    | MTProto login, group/topic lifecycle, encrypted chunk round-trip — **done**            |
+| **M1**    | Passphrase-derived vault, master key wrap/unwrap, cross-device recovery — **done**     |
+| M2        | Drive UI: folders ↔ topics, upload queue, chunk manifest                               |
+| M3        | Encrypted index snapshot + event log in `#index`, local IndexedDB cache, MiniSearch    |
+| M4        | Search/filter by category (images/video/audio/documents), retry/resume, flood handling |
+| M5        | Previews ≤50 MB, trash + 30-day retention, download/export                             |
+| M6        | Polish: PWA/offline shell, themes, keyboard shortcuts, storage stats                   |
 
 ## Known limitations
 
-- No vault yet: clearing browser storage loses the session and the spike keys.
-- No drive UI, index, search, trash or previews yet.
+- The vault is implemented, but the drive UI still uses the M0 spike path; files uploaded there are not indexed in the vault yet.
+- No file index, search, trash or previews yet.
+- Losing the vault passphrase means the drive cannot be recovered.
+- Clearing browser storage loses the session; the drive and vault are re-discovered from Telegram after signing in again.
 - 200 MB per file and one upload at a time; Telegram rate limits still apply per chat.
 - “Archived” means the group is placed in your client's Archive folder; the app never deletes the group.
 - Telegram channel/supergroup limits and account restrictions can change without notice.

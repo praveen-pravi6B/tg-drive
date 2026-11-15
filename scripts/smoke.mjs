@@ -89,6 +89,9 @@ try {
   await page.goto(`${BASE}/drive`, { waitUntil: 'domcontentloaded', timeout: 30000 })
   await page.waitForFunction(() => window.location.pathname === '/login', { timeout: 15000 })
 
+  await page.goto(`${BASE}/vault`, { waitUntil: 'domcontentloaded', timeout: 30000 })
+  await page.waitForFunction(() => window.location.pathname === '/login', { timeout: 15000 })
+
   const fatalConsole = consoleErrors.filter(
     (line) =>
       !/favicon|Vue Devtools|telegram|websocket|net::|ERR_|Failed to fetch|network|\[object Event\]/i.test(
@@ -100,7 +103,7 @@ try {
 
   console.log('smoke: ok')
   console.log('  login view renders and starts QR login')
-  console.log('  route guard: /debug and /drive redirect to /login')
+  console.log('  route guard: /debug, /drive and /vault redirect to /login')
   console.log('  console errors: none (outside Telegram network noise)')
   console.log(`  rendered: ${text.split('\n').filter(Boolean).slice(0, 5).join(' | ')}`)
 } catch (error) {

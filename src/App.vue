@@ -2,11 +2,13 @@
 import { computed, onMounted } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { useOnline } from '@vueuse/core'
-import { Cloud, HardDrive, LogOut, Terminal, WifiOff } from '@lucide/vue'
+import { Cloud, HardDrive, KeyRound, LogOut, Terminal, WifiOff } from '@lucide/vue'
 import { useAuthStore } from '@/stores/auth'
+import { useVaultStore } from '@/stores/vault'
 import AppButton from '@/components/ui/AppButton.vue'
 
 const auth = useAuthStore()
+const vault = useVaultStore()
 const route = useRoute()
 const router = useRouter()
 const online = useOnline()
@@ -24,6 +26,7 @@ const initials = computed(() => {
 const showShellNav = computed(() => auth.isAuthorized)
 
 async function signOut() {
+  vault.reset()
   await auth.logout()
   router.replace({ name: 'login' })
 }
@@ -55,8 +58,10 @@ onMounted(() => {
             <Cloud class="h-4 w-4" />
           </span>
           <span class="text-sm font-semibold tracking-tight">TGDrive</span>
-          <span class="hidden rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-muted-foreground sm:inline">
-            M0
+          <span
+            class="hidden rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-muted-foreground sm:inline"
+          >
+            M1
           </span>
         </RouterLink>
 
@@ -71,6 +76,14 @@ onMounted(() => {
           >
             <HardDrive class="h-3.5 w-3.5" />
             Drive
+          </RouterLink>
+          <RouterLink
+            to="/vault"
+            class="focus-ring flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+            :class="route.name === 'vault' && 'bg-white/5 text-foreground'"
+          >
+            <KeyRound class="h-3.5 w-3.5" />
+            Vault
           </RouterLink>
           <RouterLink
             to="/debug"
