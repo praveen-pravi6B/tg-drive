@@ -34,14 +34,14 @@ export const useDriveStore = defineStore('drive', {
     creatingFolder: false,
     indexLoaded: false,
     indexMessageId: 0,
-    upload: null, // { fileName, fileId, progress, stage, error, done, chunksDone, chunkCount }
+    uploadTask: null, // { fileName, fileId, progress, stage, error, done, chunksDone, chunkCount, running }
   }),
 
   getters: {
     selectedFolder(state) {
       return state.folders.find((folder) => folder.id === state.selectedTopicId) || null
     },
-    isUploading: (state) => Boolean(state.upload?.running),
+    isUploading: (state) => Boolean(state.uploadTask?.running),
   },
 
   actions: {
@@ -266,7 +266,7 @@ export const useDriveStore = defineStore('drive', {
 
       const { client, channel, masterKey } = this.requireReady()
       uploadAbort = new AbortController()
-      this.upload = {
+      this.uploadTask = {
         fileName: file.name || 'file',
         fileId: '',
         progress: 0,
@@ -288,22 +288,22 @@ export const useDriveStore = defineStore('drive', {
           chunkSize: limits.chunkSize,
           signal: uploadAbort.signal,
           onProgress: (event) => {
-            if (!this.upload) return
+            if (!this.uploadTask) return
             if (event.type === 'start') {
-              this.upload.fileId = event.fileId
-              this.upload.chunkCount = event.chunkCount || 0
-              this.upload.stage = 'encrypting & uploading'
+              this.uploadTask.fileId = event.fileId
+              this.uploadTask.chunkCount = event.chunkCount || 0
+              this.uploadTask.stage = 'encrypting & uploading'
             } else if (event.type === 'chunk-upload-progress') {
-              this.upload.stage = `uploading chunk ${event.index + 1}/${this.upload.chunkCount || '?'}`
+              this.uploadTask.stage = `uploading chunk ${event.index + 1}/${this.uploadTask.chunkCount || '?'}`
             } else if (event.type === 'chunk-uploaded') {
-              this.upload.chunksDone = event.index + 1
-              this.upload.progress = Math.round(
-                (this.upload.chunksDone / (this.upload.chunkCount || 1)) * 100,
+              this.uploadTask.chunksDone = event.index + 1
+              this.uploadTask.progress = Math.round(
+                (this.uploadTask.chunksDone / (this.uploadTask.chunkCount || 1)) * 100,
               )
             } else if (event.type === 'done') {
-              this.upload.progress = 100
-              this.upload.stage = 'saved'
-              this.upload.done = true
+              this.uploadTask.progress = 100
+              this.uploadTask.stage = 'saved'
+              this.uploadTask.done = true
             }
           },
         })
@@ -312,15 +312,15 @@ export const useDriveStore = defineStore('drive', {
         await this.saveIndex()
         return manifest
       } catch (error) {
-        if (this.upload) {
-          this.upload.error = errorMessage(error)
-          this.upload.stage = 'failed'
-          this.upload.done = false
+        if (this.uploadTask) {
+          this.uploadTask.error = errorMessage(error)
+          this.uploadTask.stage = 'failed'
+          this.uploadTask.done = false
         }
         log('error', 'drive', 'Upload failed', error)
         throw error
       } finally {
-        if (this.upload) this.upload.running = false
+        if (this.uploadTask) this.uploadTask.running = false
         uploadAbort = null
       }
     },
@@ -331,7 +331,7 @@ export const useDriveStore = defineStore('drive', {
 
     clearUpload() {
       if (uploadAbort) uploadAbort.abort()
-      this.upload = null
+      this.uploadTask = null
     },
 
     async download(manifest) {

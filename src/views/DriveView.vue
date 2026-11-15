@@ -327,31 +327,31 @@ onMounted(async () => {
         </div>
 
         <AppCard
-          v-if="drive.upload"
-          :title="`Upload: ${drive.upload.fileName || 'file'}`"
+          v-if="drive.uploadTask"
+          :title="`Upload: ${drive.uploadTask.fileName || 'file'}`"
           description="Encrypted on this device before sending"
         >
           <div class="space-y-2">
             <div class="flex items-center justify-between text-xs text-muted-foreground">
-              <span class="capitalize">{{ drive.upload.stage || 'starting' }}</span>
-              <span>{{ Number(drive.upload.progress || 0) }}%</span>
+              <span class="capitalize">{{ drive.uploadTask.stage || 'starting' }}</span>
+              <span>{{ Number(drive.uploadTask.progress || 0) }}%</span>
             </div>
             <div class="h-2 overflow-hidden rounded-full bg-white/5">
               <div
                 class="h-full rounded-full bg-sky-400 transition-all"
-                :style="{ width: `${Number(drive.upload.progress || 0)}%` }"
+                :style="{ width: `${Number(drive.uploadTask.progress || 0)}%` }"
               />
             </div>
             <div class="flex items-center gap-2">
-              <p v-if="drive.upload.error" class="text-xs text-red-300">
-                {{ drive.upload.error }}
+              <p v-if="drive.uploadTask.error" class="text-xs text-red-300">
+                {{ drive.uploadTask.error }}
               </p>
-              <p v-else-if="drive.upload.done" class="text-xs text-emerald-300">
+              <p v-else-if="drive.uploadTask.done" class="text-xs text-emerald-300">
                 Upload complete and manifest saved.
               </p>
               <p v-else class="text-xs text-muted-foreground">
-                {{ Number(drive.upload.chunksDone || 0) }}/{{
-                  drive.upload.chunkCount || '…'
+                {{ Number(drive.uploadTask.chunksDone || 0) }}/{{
+                  drive.uploadTask.chunkCount || '…'
                 }}
                 chunks uploaded
               </p>
