@@ -2,7 +2,7 @@
 
 An encrypted, serverless drive that stores files in **your own private Telegram forum supergroup**. No backend, no database, no account to create — the browser talks MTProto directly to Telegram.
 
-> **Status: M1 complete.** The vault is implemented: a passphrase-derived Argon2id key wraps a random master key, and only the wrapped key is stored in the reserved `#index` topic. Login, group/topic provisioning, and an encrypted 200 MB round-trip remain verified live via the **Spike lab** (`/debug`). The drive UI, file index, previews and trash are still to come. Treat this as a development build, not a backup product.
+> **Status: M2 in progress.** Vault recovery (M1) and a basic drive UI are in place: folders map to forum topics, single-file uploads are chunked/encrypted with vault-derived keys, and an encrypted manifest per file is stored in the folder topic for listing/download/delete. A full encrypted index, search, previews and trash are still to come. Treat this as a development build, not a backup product.
 
 ---
 
@@ -110,6 +110,15 @@ The envelope is plaintext JSON containing only public parameters (`v`, `driveId`
 
 ---
 
+## Drive UI (`/drive`, M2 slice)
+
+- **Folders ↔ topics:** folders are Telegram forum topics (names visible as topic titles). Reserved topics `#index` and `#trash` are hidden from the folder list.
+- **Upload:** requires an unlocked vault. Each file (≤200 MB, one at a time) is chunked, encrypted per chunk with a key derived from the master key (`HKDF-SHA-256`, `file-v1:<fileId>`), and uploaded as opaque documents.
+- **Manifest:** an encrypted manifest (`tgm1:<fileId>`) is stored in the same folder topic with file metadata and chunk references. The drive view scans folder messages for manifests and decrypts them locally to list files.
+- **Actions:** download (reassembles + verifies hashes) and delete (removes chunks and manifest). No encrypted global index/snapshot, search, previews, trash/retention, or resumable uploads yet.
+
+---
+
 ## M0 spike lab (`/debug`)
 
 The lab proves the storage primitives against your real account:
@@ -139,13 +148,16 @@ src/
     crypto/chunk.js       worker-backed encrypt/decrypt/SHA-256
     vault/format.js       vault envelope + reserved names
     vault/vault.js        create / rewrap / unlock (Argon2id + AES-GCM)
+    drive/manifest.js     encrypted per-file manifest format
+    drive/files.js        upload/list/download/delete for topic files
     telegram/session.js   session string persistence
     telegram/topics.js    group, forum topic, message, upload helpers
     telegram/drive.js     drive discovery + vault read/write in #index
     telegram/roundtrip.js M0 encrypt → upload → download → verify pipeline
   stores/auth.js          GramJS client lifecycle, QR/phone auth
   stores/vault.js         vault lifecycle; master key in module scope only
-  views/                  Login, Drive (placeholder), Vault, Spike lab, 404
+  stores/drive.js         folders/topics, upload queue, file listing/actions
+  views/                  Login, Drive, Vault, Spike lab, 404
   components/ui/          small Tailwind UI primitives
   workers/crypto.worker.js WebCrypto worker (keys never leave the device)
 ```
@@ -177,7 +189,7 @@ The GitHub repo is ready for a later “Connect to Git” step: push the repo, t
 | --------- | -------------------------------------------------------------------------------------- |
 | **M0**    | MTProto login, group/topic lifecycle, encrypted chunk round-trip — **done**            |
 | **M1**    | Passphrase-derived vault, master key wrap/unwrap, cross-device recovery — **done**     |
-| M2        | Drive UI: folders ↔ topics, upload queue, chunk manifest                               |
+| **M2**    | Drive UI: folders ↔ topics, upload queue, chunk manifest — **basic slice done**        |
 | M3        | Encrypted index snapshot + event log in `#index`, local IndexedDB cache, MiniSearch    |
 | M4        | Search/filter by category (images/video/audio/documents), retry/resume, flood handling |
 | M5        | Previews ≤50 MB, trash + 30-day retention, download/export                             |
@@ -185,8 +197,9 @@ The GitHub repo is ready for a later “Connect to Git” step: push the repo, t
 
 ## Known limitations
 
-- The vault is implemented, but the drive UI still uses the M0 spike path; files uploaded there are not indexed in the vault yet.
-- No file index, search, trash or previews yet.
+- Drive UI is a basic M2 slice: folder/topic management and per-folder manifest scanning work, but there is no global encrypted index yet (listing scans topic messages).
+- No search, previews, trash/30-day retention, or resumable/retry-heavy uploads yet.
+- The M0 spike lab still uses its own ephemeral keys/path; normal uploads go through the vault-derived file keys.
 - Losing the vault passphrase means the drive cannot be recovered.
 - Clearing browser storage loses the session; the drive and vault are re-discovered from Telegram after signing in again.
 - 200 MB per file and one upload at a time; Telegram rate limits still apply per chat.
