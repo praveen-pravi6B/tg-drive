@@ -9,6 +9,7 @@ import {
   downloadFile,
   isReservedTopicTitle,
   listFilesInTopic,
+  renameFile,
   uploadFile,
 } from '@/lib/drive/files'
 import { openSnapshot, sealSnapshot } from '@/lib/drive/index'
@@ -355,6 +356,22 @@ export const useDriveStore = defineStore('drive', {
       a.click()
       a.remove()
       setTimeout(() => URL.revokeObjectURL(url), 10000)
+    },
+
+    async rename(manifest, newName) {
+      const { client, channel, masterKey } = this.requireReady()
+      const updated = await renameFile({
+        client,
+        channel,
+        topicId: manifest.folderTopicId || this.selectedTopicId,
+        manifest,
+        newName,
+        masterKey,
+      })
+      this.allFiles = this.allFiles.map((file) => (file.id === manifest.id ? { ...file, ...updated } : file))
+      this.syncSelectedFiles()
+      await this.saveIndex()
+      return updated
     },
 
     async remove(manifest) {

@@ -198,4 +198,30 @@ export async function deleteFile({ client, channel, manifest }) {
   log('info', 'drive', `Deleted ${manifest.name || manifest.id}`, { messages: ids.length })
 }
 
-export { MANIFEST_CAPTION_PREFIX }
+export async function renameFile({ client, channel, topicId, manifest, newName, masterKey }) {
+  if (!masterKey) throw new Error('Unlock the vault before renaming')
+  const name = String(newName || '').trim()
+  if (!name) throw new Error('Name is required')
+  const updated = {
+    ...manifest,
+    name,
+    category: fileCategory(manifest.mime, name),
+    updatedAt: new Date().toISOString(),
+  }
+  delete updated.manifestMessageId
+  const { encrypted } = await sealManifest({ masterKey, manifest: updated })
+  const message = await sendDocumentToTopic({
+    client,
+    channel,
+    topicId: topicId || manifest.folderTopicId,
+    name: `m_${manifest.id}.bin`,
+    data: encrypted,
+    caption: manifestCaption(manifest.id),
+  })
+  if (manifest.manifestMessageId && manifest.manifestMessageId !== message.id) {
+    await deleteMessages(client, channel, [manifest.manifestMessageId])
+  }
+  updated.manifestMessageId = message.id
+  log('info', 'drive', `Renamed file ${manifest.id} to "${name}"`)
+  return updated
+}
