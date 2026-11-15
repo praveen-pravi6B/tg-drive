@@ -207,13 +207,27 @@ export async function sendDocumentToTopic({
 }) {
   const bytes = Buffer.from(data)
   const file = new CustomFile(name, bytes.length, '', bytes)
-  return client.sendFile(toInputChannel(channel), {
+
+  // Upload separately. `sendFile` -> `uploadFile` defaults `maxBufferSize` to
+  // 20 MB - 1 byte; anything larger makes GramJS ignore the in-memory buffer
+  // and try to read `file.path` (empty in a browser), which fails instantly.
+  // Passing the exact size keeps the buffer path for every chunk.
+  const uploaded = await client.uploadFile({
     file,
+    workers: 1,
+    onProgress,
+    maxBufferSize: Math.max(bytes.length, 1),
+  })
+
+  return client.sendFile(toInputChannel(channel), {
+    file: uploaded,
     caption,
     forceDocument: true,
+    // GramJS only builds the `reply_to` object when `replyTo` is set, and it
+    // drops `topMsgId` otherwise. Telegram expects the topic id in
+    // `reply_to_msg_id` for messages posted inside a forum topic.
+    replyTo: topicId,
     topMsgId: topicId,
-    workers: 1,
-    progressCallback: onProgress,
   })
 }
 

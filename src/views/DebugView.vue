@@ -516,7 +516,7 @@ async function startRoundTrip() {
     } else {
       rt.status = 'error'
       rt.error = errorMessage(error)
-      log('error', 'roundtrip', 'Round-trip failed', error)
+      log('error', 'roundtrip', `Round-trip failed: ${errorMessage(error)}`, error)
     }
   } finally {
     busy.value = ''
