@@ -5,7 +5,10 @@ const HKDF_SALT = utf8('tgdrive-hkdf-v1')
 const AES_GCM = { name: 'AES-GCM', length: 256 }
 
 async function importHkdfKey(rawMaster) {
-  return crypto.subtle.importKey('raw', toArrayBuffer(rawMaster), 'HKDF', false, ['deriveBits', 'deriveKey'])
+  return crypto.subtle.importKey('raw', toArrayBuffer(rawMaster), 'HKDF', false, [
+    'deriveBits',
+    'deriveKey',
+  ])
 }
 
 export function generateMasterKey() {
@@ -78,7 +81,22 @@ export async function deriveKekPbkdf2(passphrase, salt, iterations = 600000) {
   return { key, params: { iterations } }
 }
 
+async function ensureAesKey(key, usages = ['encrypt', 'decrypt']) {
+  if (typeof CryptoKey !== 'undefined' && key instanceof CryptoKey) return key
+  if (key instanceof Uint8Array || key instanceof ArrayBuffer || ArrayBuffer.isView(key)) {
+    return crypto.subtle.importKey(
+      'raw',
+      toArrayBuffer(key instanceof Uint8Array ? key : new Uint8Array(key.buffer || key)),
+      { name: 'AES-GCM' },
+      false,
+      usages,
+    )
+  }
+  return key
+}
+
 export async function aesGcmEncrypt(key, plaintext, aad = '') {
+  const cryptoKey = await ensureAesKey(key, ['encrypt', 'decrypt'])
   const nonce = randomBytes(12)
   const ciphertext = new Uint8Array(
     await crypto.subtle.encrypt(
@@ -88,7 +106,7 @@ export async function aesGcmEncrypt(key, plaintext, aad = '') {
         additionalData: aad ? utf8(aad) : undefined,
         tagLength: 128,
       },
-      key,
+      cryptoKey,
       plaintext,
     ),
   )
@@ -96,6 +114,7 @@ export async function aesGcmEncrypt(key, plaintext, aad = '') {
 }
 
 export async function aesGcmDecrypt(key, payload, aad = '') {
+  const cryptoKey = await ensureAesKey(key, ['encrypt', 'decrypt'])
   const nonce = payload.subarray(0, 12)
   const ciphertext = payload.subarray(12)
   const plaintext = await crypto.subtle.decrypt(
@@ -105,7 +124,7 @@ export async function aesGcmDecrypt(key, payload, aad = '') {
       additionalData: aad ? utf8(aad) : undefined,
       tagLength: 128,
     },
-    key,
+    cryptoKey,
     ciphertext,
   )
   return new Uint8Array(plaintext)
