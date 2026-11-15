@@ -805,23 +805,40 @@ export const useDriveStore = defineStore('drive', {
       if (folderId === 1) throw new Error('Home folder cannot be deleted')
       const { client, channel } = this.requireReady()
 
-      // Remove files in this folder from the encrypted index state (including trashed).
-      this.allFiles = this.allFiles.filter((file) => Number(file.folderTopicId) !== folderId)
+      const now = new Date().toISOString()
+      const hadFiles = this.allFiles.some((file) => Number(file.folderTopicId) === folderId)
+
+      // Move all files in this folder to Trash so they remain recoverable.
+      // Keep their folderTopicId/chunk messages intact (do not delete the topic if files exist).
+      this.allFiles = this.allFiles.map((file) =>
+        Number(file.folderTopicId) === folderId
+          ? {
+              ...file,
+              trashedAt: file.trashedAt || now,
+              trashedFromTopicId: folderId,
+            }
+          : file,
+      )
       this.folders = this.folders.filter((folder) => folder.id !== folderId)
 
       if (this.selectedTopicId === folderId) {
+        this.showTrash = false
         this.selectedTopicId = this.folders[0]?.id || 0
       }
       this.syncSelectedFiles()
-      this.appendEvent('folder.delete', { folderTopicId: folderId })
+      this.appendEvent('folder.delete', { folderTopicId: folderId, trashedFiles: hadFiles })
       await this.saveIndex()
 
-      try {
-        await deleteTopic(client, channel, folderId)
-        log('info', 'drive', `Deleted folder/topic ${folderId}`)
-      } catch (error) {
-        log('error', 'drive', 'Could not delete folder topic on Telegram', error)
-        throw error
+      if (!hadFiles) {
+        try {
+          await deleteTopic(client, channel, folderId)
+          log('info', 'drive', `Deleted empty folder/topic ${folderId}`)
+        } catch (error) {
+          log('error', 'drive', 'Could not delete folder topic on Telegram', error)
+          throw error
+        }
+      } else {
+        log('info', 'drive', `Removed folder ${folderId} from list; its files were moved to Trash`)
       }
     },
 
