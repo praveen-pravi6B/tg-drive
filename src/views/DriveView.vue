@@ -65,6 +65,7 @@ const vaultFormError = ref('')
 const vaultRevealing = ref(false)
 const selectedIds = ref(new Set())
 const clipboard = ref(null) // { mode: 'cut'|'copy', ids: string[], sourceTopicId: number }
+const selectionMode = ref(false)
 
 const videoRef = ref(null)
 const videoPlaying = ref(false)
@@ -88,6 +89,7 @@ const checking = computed(
 const previewableInFolder = computed(() => drive.files.filter((f) => isPreviewable(f)))
 const selectedCount = computed(() => selectedIds.value.size)
 const hasSelection = computed(() => selectedIds.value.size > 0)
+const showSelectionUi = computed(() => selectionMode.value || selectedIds.value.size > 0)
 const hasClipboard = computed(
   () => Array.isArray(clipboard.value?.ids) && clipboard.value.ids.length > 0,
 )
@@ -213,14 +215,16 @@ function toggleSelection(id) {
   if (next.has(id)) next.delete(id)
   else next.add(id)
   selectedIds.value = next
+  if (next.size === 0) selectionMode.value = false
 }
 function clearSelection() {
   if (selectedIds.value.size) selectedIds.value = new Set()
+  selectionMode.value = false
 }
-// reserved for future bulk actions
-// function selectAllCurrent() {
-//   selectedIds.value = new Set((drive.files || []).map((f) => f.id).filter(Boolean))
-// }
+function selectAllCurrent() {
+  selectedIds.value = new Set((drive.files || []).map((f) => f.id).filter(Boolean))
+  if (selectedIds.value.size) selectionMode.value = true
+}
 function copySelection() {
   const ids = [...selectedIds.value]
   if (!ids.length) return
@@ -340,6 +344,7 @@ function ctxDelete(item) {
 }
 function ctxToggleSelect(item) {
   if (!item) return
+  if (!isSelected(item.id)) selectionMode.value = true
   toggleSelection(item.id)
   closeContextMenu()
 }
@@ -668,6 +673,16 @@ onBeforeUnmount(() => {
           </div>
 
           <AppButton
+            v-if="showSelectionUi && drive.files.length"
+            variant="outline"
+            size="md"
+            :disabled="!ready || drive.filesLoading"
+            @click="selectAllCurrent"
+          >
+            Select all
+          </AppButton>
+
+          <AppButton
             variant="outline"
             size="md"
             :disabled="!ready || drive.filesLoading"
@@ -901,10 +916,10 @@ onBeforeUnmount(() => {
               "
               @contextmenu="openContextMenu($event, item)"
             >
-              <div class="absolute left-1.5 top-1.5 z-10">
+              <div v-if="showSelectionUi" class="absolute left-1.5 top-1.5 z-10">
                 <input
                   type="checkbox"
-                  class="h-4 w-4 rounded border-white/20 bg-black/50 accent-sky-500"
+                  class="h-4 w-4 rounded-full border-white/30 bg-black/50 accent-sky-500"
                   :checked="isSelected(item.id)"
                   @click.stop
                   @change="toggleSelection(item.id)"
@@ -976,8 +991,9 @@ onBeforeUnmount(() => {
               @contextmenu="openContextMenu($event, item)"
             >
               <input
+                v-if="showSelectionUi"
                 type="checkbox"
-                class="h-4 w-4 shrink-0 rounded border-white/20 bg-black/40 accent-sky-500"
+                class="h-4 w-4 shrink-0 rounded-full border-white/30 bg-black/40 accent-sky-500"
                 :checked="isSelected(item.id)"
                 @click.stop
                 @change="toggleSelection(item.id)"
@@ -1129,7 +1145,8 @@ onBeforeUnmount(() => {
       class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
       @click="ctxToggleSelect(contextMenu.item)"
     >
-      <Copy class="h-4 w-4" /> {{ isSelected(contextMenu.item.id) ? 'Unselect' : 'Select' }}
+      <Copy class="h-4 w-4" />
+      {{ isSelected(contextMenu.item.id) ? 'Unselect' : 'Select file' }}
     </button>
     <button
       class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
