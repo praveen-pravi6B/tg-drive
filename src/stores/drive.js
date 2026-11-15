@@ -3,7 +3,7 @@ import { useAuthStore } from './auth'
 import { useVaultStore, getMasterKey } from './vault'
 import { errorMessage, log } from '@/lib/logger'
 import { readIndexBlob, writeIndexBlob } from '@/lib/telegram/drive'
-import { createTopic, deleteTopic, listTopics } from '@/lib/telegram/topics'
+import { createTopic, deleteTopic, listTopics, renameTopic } from '@/lib/telegram/topics'
 import {
   deleteFile,
   downloadFile,
@@ -424,6 +424,7 @@ export const useDriveStore = defineStore('drive', {
     async deleteFolder(topicId) {
       const folderId = Number(topicId)
       if (!folderId) throw new Error('No folder selected')
+      if (folderId === 1) throw new Error('Home folder cannot be deleted')
       const { client, channel } = this.requireReady()
 
       // Remove files in this folder from the encrypted index state.
@@ -443,6 +444,24 @@ export const useDriveStore = defineStore('drive', {
         log('error', 'drive', 'Could not delete folder topic on Telegram', error)
         throw error
       }
+    },
+
+    async renameFolder(topicId, newTitle) {
+      const folderId = Number(topicId)
+      const title = String(newTitle || '').trim()
+      if (!folderId) throw new Error('No folder selected')
+      if (folderId === 1) throw new Error('Home folder cannot be renamed')
+      if (!title) throw new Error('Folder name is required')
+      const { client, channel } = this.requireReady()
+      await renameTopic(client, channel, folderId, title)
+      this.folders = sortFolders(
+        this.folders.map((folder) =>
+          folder.id === folderId ? normalizeFolder({ ...folder, title }) : folder,
+        ),
+      )
+      this.syncSelectedFiles()
+      await this.saveIndex()
+      log('info', 'drive', `Renamed folder ${folderId} to "${title}"`)
     },
 
     async pasteFiles({ mode, manifests, targetTopicId }) {

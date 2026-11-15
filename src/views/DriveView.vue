@@ -56,8 +56,8 @@ const busyFileId = ref('')
 const preview = ref(null) // { item, url, kind, loading, error }
 const thumbUrls = ref({})
 const thumbLoading = ref({})
-const contextMenu = ref(null) // { x, y, item }
-const renameTarget = ref(null)
+const contextMenu = ref(null) // { x, y, kind: 'file'|'folder'|'background', item }
+const renameTarget = ref(null) // { kind: 'file'|'folder', item }
 const renameValue = ref('')
 const vaultPassphrase = ref('')
 const vaultConfirm = ref('')
@@ -345,14 +345,18 @@ function fmtTime(sec) {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
-function openContextMenu(e, item) {
+function openContextMenu(e, item, kind = 'file') {
   e.preventDefault()
   e.stopPropagation?.()
-  contextMenu.value = { x: e.clientX, y: e.clientY, item: item || null }
+  contextMenu.value = { x: e.clientX, y: e.clientY, item: item || null, kind }
 }
 function openBackgroundMenu(e) {
   if (!ready.value || !drive.selectedTopicId) return
-  openContextMenu(e, null)
+  openContextMenu(e, null, 'background')
+}
+function openFolderMenu(e, folder) {
+  if (!folder) return
+  openContextMenu(e, folder, 'folder')
 }
 function closeContextMenu() {
   contextMenu.value = null
@@ -367,6 +371,22 @@ function ctxDownload(item) {
 }
 function ctxDelete(item) {
   removeFile(item)
+  closeContextMenu()
+}
+function ctxCopy(item) {
+  if (!item) return
+  clipboard.value = { mode: 'copy', ids: [item.id], sourceTopicId: drive.selectedTopicId }
+  selectionMode.value = true
+  selectedIds.value = new Set([item.id])
+  selectionAnchor.value = itemIndex(item.id)
+  closeContextMenu()
+}
+function ctxCut(item) {
+  if (!item) return
+  clipboard.value = { mode: 'cut', ids: [item.id], sourceTopicId: drive.selectedTopicId }
+  selectionMode.value = true
+  selectedIds.value = new Set([item.id])
+  selectionAnchor.value = itemIndex(item.id)
   closeContextMenu()
 }
 function ctxToggleSelect(item) {
@@ -468,8 +488,19 @@ function onGlobalKey(e) {
 
 function startRename(item) {
   if (!item || selectedCount.value > 1) return
-  renameTarget.value = item
+  renameTarget.value = { kind: 'file', item }
   renameValue.value = item?.name || ''
+  closeContextMenu()
+  nextTick(() => {
+    const el = document.getElementById('rename-input')
+    el?.focus?.()
+    el?.select?.()
+  })
+}
+function startRenameFolder(folder) {
+  if (!folder || Number(folder.id) === 1) return
+  renameTarget.value = { kind: 'folder', item: folder }
+  renameValue.value = folder?.title || ''
   closeContextMenu()
   nextTick(() => {
     const el = document.getElementById('rename-input')
@@ -482,9 +513,14 @@ async function submitRename() {
   const name = renameValue.value.trim()
   if (!name) return
   actionError.value = ''
-  busyFileId.value = renameTarget.value.id
+  const target = renameTarget.value
+  busyFileId.value = target.item?.id || ''
   try {
-    await drive.rename(renameTarget.value, name)
+    if (target.kind === 'folder') {
+      await drive.renameFolder(target.item.id, name)
+    } else {
+      await drive.rename(target.item, name)
+    }
     renameTarget.value = null
   } catch (error) {
     actionError.value = error.message
@@ -536,13 +572,31 @@ async function createFolder() {
 
 async function deleteCurrentFolder() {
   const folder = drive.selectedFolder
-  if (!folder) return
+  if (!folder || Number(folder.id) === 1) return
   const count = drive.files.length
   const ok = window.confirm(
     `Delete folder "${folder.title}"?\n\nThis removes the folder topic and its files from Telegram. (${count} file(s) in the current index)`,
   )
   if (!ok) return
   actionError.value = ''
+  try {
+    await drive.deleteFolder(folder.id)
+  } catch (error) {
+    actionError.value = error.message
+  }
+}
+
+async function deleteFolderById(folder) {
+  if (!folder || Number(folder.id) === 1) return
+  const filesInFolder = drive.allFiles.filter(
+    (file) => Number(file.folderTopicId) === Number(folder.id),
+  ).length
+  const ok = window.confirm(
+    `Delete folder "${folder.title}"?\n\nThis removes the folder topic and its files from Telegram. (${filesInFolder} file(s) in the current index)`,
+  )
+  if (!ok) return
+  actionError.value = ''
+  closeContextMenu()
   try {
     await drive.deleteFolder(folder.id)
   } catch (error) {
@@ -694,6 +748,7 @@ onBeforeUnmount(() => {
                 : 'text-muted-foreground'
             "
             @click="drive.selectFolder(folder.id)"
+            @contextmenu="openFolderMenu($event, folder)"
           >
             <span class="grid h-5 w-5 place-items-center rounded bg-white/5 text-sky-300">
               <HardDrive class="h-3 w-3" />
@@ -721,7 +776,7 @@ onBeforeUnmount(() => {
               {{ drive.selectedFolder?.title || 'My Drive' }}
             </h1>
             <button
-              v-if="drive.selectedFolder"
+              v-if="drive.selectedFolder && Number(drive.selectedFolder.id) !== 1"
               type="button"
               class="rounded-md p-1.5 text-muted-foreground hover:bg-red-500/10 hover:text-red-300"
               title="Delete folder"
@@ -937,7 +992,7 @@ onBeforeUnmount(() => {
               :class="
                 isSelected(item.id) ? 'border-sky-400/40 ring-1 ring-sky-400/30' : 'border-white/5'
               "
-              @contextmenu="openContextMenu($event, item)"
+              @contextmenu="openContextMenu($event, item, 'file')"
             >
               <div v-if="showSelectionUi" class="absolute left-1.5 top-1.5 z-10">
                 <button
@@ -982,7 +1037,7 @@ onBeforeUnmount(() => {
                 type="button"
                 class="absolute right-1.5 top-1.5 rounded-md bg-black/40 p-1 text-white opacity-0 backdrop-blur transition-opacity hover:bg-black/60 group-hover:opacity-100"
                 title="More"
-                @click.stop="openContextMenu($event, item)"
+                @click.stop="openContextMenu($event, item, 'file')"
               >
                 <MoreVertical class="h-4 w-4" />
               </button>
@@ -1018,7 +1073,7 @@ onBeforeUnmount(() => {
               :key="item.id"
               class="flex items-center gap-3 px-3 py-2.5 hover:bg-white/[0.03]"
               :class="isSelected(item.id) ? 'bg-sky-400/[0.06]' : ''"
-              @contextmenu="openContextMenu($event, item)"
+              @contextmenu="openContextMenu($event, item, 'file')"
             >
               <button
                 v-if="showSelectionUi"
@@ -1061,7 +1116,7 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="rounded p-1.5 text-muted-foreground hover:bg-white/5 hover:text-foreground"
-                @click.stop="openContextMenu($event, item)"
+                @click.stop="openContextMenu($event, item, 'file')"
               >
                 <MoreVertical class="h-4 w-4" />
               </button>
@@ -1165,7 +1220,7 @@ onBeforeUnmount(() => {
     @click.stop
     @contextmenu.prevent
   >
-    <template v-if="contextMenu.item">
+    <template v-if="contextMenu.kind === 'file' && contextMenu.item">
       <button
         class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
         @click="ctxOpen(contextMenu.item)"
@@ -1187,6 +1242,18 @@ onBeforeUnmount(() => {
         {{ isSelected(contextMenu.item.id) ? 'Unselect' : 'Select file' }}
       </button>
       <button
+        class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+        @click="ctxCopy(contextMenu.item)"
+      >
+        <Copy class="h-4 w-4" /> Copy
+      </button>
+      <button
+        class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+        @click="ctxCut(contextMenu.item)"
+      >
+        <Scissors class="h-4 w-4" /> Cut
+      </button>
+      <button
         v-if="hasClipboard && drive.selectedTopicId"
         class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
         @click="ctxPaste()"
@@ -1206,6 +1273,25 @@ onBeforeUnmount(() => {
         <Trash2 class="h-4 w-4" /> Delete
       </button>
     </template>
+
+    <template v-else-if="contextMenu.kind === 'folder' && contextMenu.item">
+      <template v-if="Number(contextMenu.item.id) !== 1">
+        <button
+          class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+          @click="startRenameFolder(contextMenu.item)"
+        >
+          <Pencil class="h-4 w-4" /> Rename
+        </button>
+        <button
+          class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10"
+          @click="deleteFolderById(contextMenu.item)"
+        >
+          <Trash2 class="h-4 w-4" /> Delete
+        </button>
+      </template>
+      <div v-else class="px-3 py-2 text-sm text-muted-foreground">No actions for Home</div>
+    </template>
+
     <template v-else>
       <button
         v-if="hasClipboard && drive.selectedTopicId"
@@ -1240,7 +1326,9 @@ onBeforeUnmount(() => {
       class="w-full max-w-sm rounded-xl border border-white/10 bg-background p-4 shadow-xl"
       @submit.prevent="submitRename"
     >
-      <h3 class="text-sm font-semibold">Rename</h3>
+      <h3 class="text-sm font-semibold">
+        {{ renameTarget.kind === 'folder' ? 'Rename folder' : 'Rename file' }}
+      </h3>
       <input
         id="rename-input"
         v-model="renameValue"
@@ -1250,7 +1338,7 @@ onBeforeUnmount(() => {
         <AppButton type="button" variant="ghost" size="sm" @click="renameTarget = null">
           Cancel
         </AppButton>
-        <AppButton type="submit" size="sm" :loading="busyFileId === renameTarget?.id">
+        <AppButton type="submit" size="sm" :loading="busyFileId === renameTarget?.item?.id">
           Save
         </AppButton>
       </div>

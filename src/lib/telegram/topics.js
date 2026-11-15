@@ -213,6 +213,16 @@ export async function deleteTopic(client, channel, topicId) {
   )
 }
 
+export async function renameTopic(client, channel, topicId, title) {
+  await client.invoke(
+    new Api.channels.EditForumTopic({
+      channel: toInputChannel(channel),
+      topicId,
+      title,
+    }),
+  )
+}
+
 export async function sendDocumentToTopic({
   client,
   channel,
