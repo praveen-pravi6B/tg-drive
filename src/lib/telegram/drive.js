@@ -3,6 +3,7 @@ import { randomId } from '@/lib/crypto/bytes'
 import { log } from '@/lib/logger'
 import { INDEX_CAPTION, INDEX_FILE_NAME } from '@/lib/drive/index'
 import { VAULT_CAPTION, VAULT_FILE_NAME, VAULT_TOPIC_TITLE } from '@/lib/vault/format'
+import { EVENT_CAPTION, eventFileName, sealEvent } from '@/lib/drive/eventLog'
 import {
   createDriveGroup,
   createTopic,
@@ -234,3 +235,21 @@ export async function writeIndexBlob(client, channel, topicId, blob) {
 }
 
 export { VAULT_TOPIC_TITLE }
+
+export async function appendEventLog(client, channel, topicId, { masterKey, driveId, event }) {
+  if (!topicId || !masterKey || !driveId || !event) return null
+  try {
+    const { eventId, encrypted } = await sealEvent({ masterKey, driveId, event })
+    return await sendDocumentToTopic({
+      client,
+      channel,
+      topicId,
+      name: eventFileName(eventId),
+      data: encrypted,
+      caption: EVENT_CAPTION,
+    })
+  } catch (error) {
+    log('warn', 'drive', 'Could not append encrypted event log entry', error)
+    return null
+  }
+}

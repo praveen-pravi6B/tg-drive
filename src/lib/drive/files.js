@@ -37,6 +37,8 @@ export async function uploadFile({
   chunkSize = limits.chunkSize,
   onProgress = () => {},
   signal,
+  resume,
+  onChunkStored,
 }) {
   if (!masterKey) throw new Error('Unlock the vault before uploading')
   if (!file) throw new Error('Choose a file to upload')
@@ -46,23 +48,43 @@ export async function uploadFile({
     )
   }
 
-  const fileId = randomId('f')
+  const effectiveChunkSize = Number(resume?.chunkSize || chunkSize)
+  const fileId = resume?.fileId || randomId('f')
   const fileKey = await deriveFileKeyBytes(masterKey, fileId)
   const total = file.size
-  const count = Math.max(1, Math.ceil(total / chunkSize))
+  const count = Math.max(1, Math.ceil(total / effectiveChunkSize))
+  const existing = new Map(
+    (resume?.chunks || [])
+      .filter((c) => c && c.messageId && Number.isInteger(c.index))
+      .map((c) => [Number(c.index), c]),
+  )
   const hasher = await createSHA256()
   hasher.init()
 
   const chunks = []
   const startedAt = performance.now()
-  onProgress({ type: 'start', fileId, total, chunkCount: count, chunkSize })
+  onProgress({
+    type: 'start',
+    fileId,
+    total,
+    chunkCount: count,
+    chunkSize: effectiveChunkSize,
+    resumed: existing.size > 0,
+  })
 
   for (let index = 0; index < count; index += 1) {
     if (signal?.aborted) throw new DOMException('Upload aborted', 'AbortError')
-    const start = index * chunkSize
-    const end = Math.min(start + chunkSize, total)
+    const start = index * effectiveChunkSize
+    const end = Math.min(start + effectiveChunkSize, total)
     const plain = new Uint8Array(await file.slice(start, end).arrayBuffer())
     hasher.update(plain)
+
+    const known = existing.get(index)
+    if (known) {
+      chunks[index] = { ...known, index }
+      onProgress({ type: 'chunk-skipped', index, messageId: known.messageId })
+      continue
+    }
 
     const aad = `${fileId}:${index}:${count}`
     const { data, sha256 } = await encryptChunk({ key: fileKey, data: plain, aad })
@@ -110,16 +132,23 @@ export async function uploadFile({
       }
     }
 
-    chunks.push({
+    const chunkMeta = {
       index,
       messageId: uploaded.id,
       plainSize: plain.length,
       encryptedSize: data.length,
       sha256,
-    })
+    }
+    chunks[index] = chunkMeta
+    try {
+      await onChunkStored?.(chunkMeta, { fileId, chunkCount: count, chunkSize: effectiveChunkSize })
+    } catch {
+      /* best-effort persistence */
+    }
     onProgress({ type: 'chunk-uploaded', index, messageId: uploaded.id })
   }
 
+  const orderedChunks = chunks.filter(Boolean).sort((a, b) => a.index - b.index)
   const manifest = {
     v: MANIFEST_VERSION,
     id: fileId,
@@ -128,9 +157,9 @@ export async function uploadFile({
     mime: file.type || 'application/octet-stream',
     category: fileCategory(file.type, file.name),
     folderTopicId: topicId,
-    chunkSize,
+    chunkSize: effectiveChunkSize,
     chunkCount: count,
-    chunks,
+    chunks: orderedChunks,
     hash: hasher.digest('hex'),
     createdAt: new Date().toISOString(),
   }

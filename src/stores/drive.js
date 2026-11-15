@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { useAuthStore } from './auth'
 import { useVaultStore, getMasterKey } from './vault'
 import { errorMessage, log } from '@/lib/logger'
-import { readIndexBlob, writeIndexBlob } from '@/lib/telegram/drive'
+import { appendEventLog, readIndexBlob, writeIndexBlob } from '@/lib/telegram/drive'
 import { createTopic, deleteTopic, listTopics, renameTopic } from '@/lib/telegram/topics'
 import {
   deleteFile,
@@ -15,6 +15,13 @@ import {
 import { openSnapshot, sealSnapshot } from '@/lib/drive/index'
 import { getCachedBlob, pruneExpiredBlobs, putCachedBlob } from '@/lib/drive/mediaCache'
 import { getCachedIndex, putCachedIndex } from '@/lib/drive/indexCache'
+import {
+  deleteUploadSession,
+  getUploadSession,
+  pruneUploadSessions,
+  putUploadSession,
+  uploadSessionKey,
+} from '@/lib/drive/uploadSessions'
 import { limits } from '@/lib/config'
 
 let uploadAbort = null
@@ -90,6 +97,30 @@ export const useDriveStore = defineStore('drive', {
       const list = Array.isArray(this.events) ? this.events : []
       list.push(event)
       this.events = list.length > 200 ? list.slice(-200) : list
+
+      // Append-only encrypted event entry in #index (best-effort).
+      try {
+        const vault = useVaultStore()
+        const auth = useAuthStore()
+        const client = auth.getClient?.()
+        const masterKey = getMasterKey()
+        if (
+          auth.isAuthorized &&
+          client &&
+          vault.status === 'unlocked' &&
+          masterKey &&
+          vault.group?.id &&
+          vault.indexTopicId
+        ) {
+          appendEventLog(client, vault.group, vault.indexTopicId, {
+            masterKey,
+            driveId: vault.driveId,
+            event: { type, at: event.at, data },
+          }).catch(() => {})
+        }
+      } catch {
+        /* ignore */
+      }
     },
 
     reset() {
@@ -422,13 +453,46 @@ export const useDriveStore = defineStore('drive', {
       const targetTopicId = Number(topicId)
       if (!targetTopicId) throw new Error('Create or select a folder first')
 
-      const { client, channel, masterKey } = this.requireReady()
+      const { client, channel, masterKey, vault } = this.requireReady()
       uploadAbort = new AbortController()
+      pruneUploadSessions().catch(() => {})
+
+      const sessionKey = uploadSessionKey({ driveId: vault.driveId, topicId: targetTopicId, file })
+      let session = await getUploadSession(sessionKey)
+      const expectedCount = Math.max(1, Math.ceil(file.size / limits.chunkSize))
+      if (
+        session &&
+        (session.driveId !== vault.driveId ||
+          Number(session.topicId) !== targetTopicId ||
+          Number(session.chunkSize) !== limits.chunkSize ||
+          Number(session.chunkCount) !== expectedCount ||
+          String(session.fileName || '') !== String(file.name || '') ||
+          Number(session.fileSize || 0) !== Number(file.size || 0))
+      ) {
+        await deleteUploadSession(sessionKey)
+        session = null
+      }
+
+      if (session && !session.fileId) {
+        await deleteUploadSession(sessionKey)
+        session = null
+      }
+
+      const resumeChunks = Array.isArray(session?.chunks) ? session.chunks : []
+      const resume =
+        session && session.fileId
+          ? {
+              fileId: session.fileId,
+              chunkSize: Number(session.chunkSize || limits.chunkSize),
+              chunks: resumeChunks,
+            }
+          : null
+
       this.uploadTask = {
         fileName: file.name || 'file',
-        fileId: '',
+        fileId: resume?.fileId || '',
         progress: 0,
-        stage: 'starting',
+        stage: resumeChunks.length ? 'resuming upload' : 'starting',
         chunksDone: 0,
         chunkCount: 0,
         error: '',
@@ -445,18 +509,68 @@ export const useDriveStore = defineStore('drive', {
           masterKey,
           chunkSize: limits.chunkSize,
           signal: uploadAbort.signal,
+          resume,
+          onChunkStored: async (chunkMeta, meta) => {
+            const current = (await getUploadSession(sessionKey)) || {
+              key: sessionKey,
+              driveId: vault.driveId,
+              topicId: targetTopicId,
+              fileName: file.name || 'file',
+              fileSize: file.size,
+              mime: file.type || 'application/octet-stream',
+              fileId: meta.fileId,
+              chunkSize: meta.chunkSize,
+              chunkCount: meta.chunkCount,
+              chunks: [],
+              createdAt: Date.now(),
+            }
+            const chunks = Array.isArray(current.chunks) ? current.chunks.slice() : []
+            const idx = chunks.findIndex((c) => Number(c.index) === Number(chunkMeta.index))
+            if (idx >= 0) chunks[idx] = chunkMeta
+            else chunks.push(chunkMeta)
+            await putUploadSession({
+              ...current,
+              key: sessionKey,
+              driveId: vault.driveId,
+              topicId: targetTopicId,
+              fileName: file.name || 'file',
+              fileSize: file.size,
+              mime: file.type || 'application/octet-stream',
+              fileId: meta.fileId,
+              chunkSize: meta.chunkSize,
+              chunkCount: meta.chunkCount,
+              chunks,
+            })
+          },
           onProgress: (event) => {
             if (!this.uploadTask) return
             if (event.type === 'start') {
               this.uploadTask.fileId = event.fileId
               this.uploadTask.chunkCount = event.chunkCount || 0
-              this.uploadTask.stage = 'encrypting & uploading'
+              this.uploadTask.stage = event.resumed ? 'resuming upload' : 'encrypting & uploading'
+              const done = resumeChunks.filter((c) => c && c.messageId).length
+              this.uploadTask.chunksDone = done
+              this.uploadTask.progress = event.chunkCount
+                ? Math.round((done / event.chunkCount) * 100)
+                : 0
+            } else if (event.type === 'chunk-skipped') {
+              this.uploadTask.chunksDone = Math.max(
+                this.uploadTask.chunksDone || 0,
+                event.index + 1,
+              )
+              this.uploadTask.progress = this.uploadTask.chunkCount
+                ? Math.round((this.uploadTask.chunksDone / this.uploadTask.chunkCount) * 100)
+                : 0
+              this.uploadTask.stage = `resuming (${this.uploadTask.chunksDone}/${this.uploadTask.chunkCount || '?'})`
             } else if (event.type === 'chunk-upload-progress') {
               this.uploadTask.stage = `uploading chunk ${event.index + 1}/${this.uploadTask.chunkCount || '?'}`
             } else if (event.type === 'chunk-retry') {
               this.uploadTask.stage = `retrying chunk ${event.index + 1}/${this.uploadTask.chunkCount || '?'}`
             } else if (event.type === 'chunk-uploaded') {
-              this.uploadTask.chunksDone = event.index + 1
+              this.uploadTask.chunksDone = Math.max(
+                this.uploadTask.chunksDone || 0,
+                event.index + 1,
+              )
               this.uploadTask.progress = Math.round(
                 (this.uploadTask.chunksDone / (this.uploadTask.chunkCount || 1)) * 100,
               )
@@ -467,6 +581,7 @@ export const useDriveStore = defineStore('drive', {
             }
           },
         })
+        await deleteUploadSession(sessionKey)
         this.allFiles = [manifest, ...this.allFiles.filter((item) => item.id !== manifest.id)]
         this.syncSelectedFiles()
         this.appendEvent('file.upload', {
@@ -482,10 +597,14 @@ export const useDriveStore = defineStore('drive', {
       } catch (error) {
         if (this.uploadTask) {
           this.uploadTask.error = errorMessage(error)
-          this.uploadTask.stage = 'failed'
+          this.uploadTask.stage = uploadAbort?.signal?.aborted ? 'paused' : 'failed'
           this.uploadTask.done = false
         }
-        log('error', 'drive', 'Upload failed', error)
+        if (!uploadAbort?.signal?.aborted) {
+          log('error', 'drive', 'Upload failed', error)
+        } else {
+          log('info', 'drive', 'Upload paused/cancelled; progress saved for resume when possible')
+        }
         throw error
       } finally {
         if (this.uploadTask) this.uploadTask.running = false
