@@ -14,6 +14,7 @@ import {
 } from '@/lib/drive/files'
 import { openSnapshot, sealSnapshot } from '@/lib/drive/index'
 import { getCachedBlob, pruneExpiredBlobs, putCachedBlob } from '@/lib/drive/mediaCache'
+import { getCachedIndex, putCachedIndex } from '@/lib/drive/indexCache'
 import { limits } from '@/lib/config'
 
 let uploadAbort = null
@@ -144,12 +145,61 @@ export const useDriveStore = defineStore('drive', {
       this.syncSelectedFiles()
     },
 
-    async loadIndex() {
+    async loadIndex({ preferCache = false } = {}) {
       const { client, channel, masterKey, vault } = this.requireReady()
       if (!vault.indexTopicId) return null
+
+      if (preferCache && !this.indexLoaded) {
+        const cached = await getCachedIndex(vault.driveId)
+        if (cached?.bytes) {
+          try {
+            const snapshot = await openSnapshot({
+              masterKey,
+              driveId: vault.driveId,
+              blob: cached.bytes,
+            })
+            this.indexMessageId = cached.messageId || 0
+            this.applySnapshot(snapshot)
+            log('info', 'drive', 'Loaded drive index from local cache', {
+              files: this.allFiles.length,
+              folders: this.folders.length,
+            })
+          } catch {
+            /* ignore bad/stale cache */
+          }
+        }
+      }
+
       try {
         const stored = await readIndexBlob(client, channel, vault.indexTopicId)
-        if (!stored) return null
+        if (!stored) {
+          const cached = await getCachedIndex(vault.driveId)
+          if (cached?.bytes) {
+            const snapshot = await openSnapshot({
+              masterKey,
+              driveId: vault.driveId,
+              blob: cached.bytes,
+            })
+            this.indexMessageId = cached.messageId || 0
+            this.applySnapshot(snapshot)
+            log('info', 'drive', 'Loaded drive index from local cache (remote missing)', {
+              files: this.allFiles.length,
+              folders: this.folders.length,
+            })
+            return snapshot
+          }
+          return null
+        }
+
+        if (preferCache && this.indexLoaded && this.indexMessageId === stored.messageId) {
+          putCachedIndex({
+            driveId: vault.driveId,
+            messageId: stored.messageId,
+            bytes: stored.bytes,
+          }).catch(() => {})
+          return { cached: true }
+        }
+
         const snapshot = await openSnapshot({
           masterKey,
           driveId: vault.driveId,
@@ -157,12 +207,38 @@ export const useDriveStore = defineStore('drive', {
         })
         this.indexMessageId = stored.messageId
         this.applySnapshot(snapshot)
+        putCachedIndex({
+          driveId: vault.driveId,
+          messageId: stored.messageId,
+          bytes: stored.bytes,
+        }).catch(() => {})
         log('info', 'drive', 'Loaded encrypted drive index', {
           files: this.allFiles.length,
           folders: this.folders.length,
         })
         return snapshot
       } catch (error) {
+        const cached = await getCachedIndex(vault.driveId)
+        if (cached?.bytes) {
+          try {
+            const snapshot = await openSnapshot({
+              masterKey,
+              driveId: vault.driveId,
+              blob: cached.bytes,
+            })
+            this.indexMessageId = cached.messageId || 0
+            this.applySnapshot(snapshot)
+            log(
+              'warn',
+              'drive',
+              'Using locally cached drive index after remote load failure',
+              error,
+            )
+            return snapshot
+          } catch {
+            /* fall through */
+          }
+        }
         log('warn', 'drive', 'Could not load drive index; falling back to live scan', error)
         return null
       }
@@ -183,6 +259,11 @@ export const useDriveStore = defineStore('drive', {
           })
           const message = await writeIndexBlob(client, channel, vault.indexTopicId, encrypted)
           this.indexMessageId = message.id
+          putCachedIndex({
+            driveId: vault.driveId,
+            messageId: message.id,
+            bytes: encrypted,
+          }).catch(() => {})
           log('info', 'drive', 'Saved encrypted drive index', {
             files: this.allFiles.length,
             folders: this.folders.length,
@@ -199,7 +280,7 @@ export const useDriveStore = defineStore('drive', {
       this.error = ''
       try {
         // Prefer the encrypted snapshot; it contains folders and file metadata.
-        const snapshot = await this.loadIndex()
+        const snapshot = await this.loadIndex({ preferCache: true })
         if (!snapshot) {
           const topics = await listTopics(client, channel, { limit: 100 })
           this.folders = sortFolders(

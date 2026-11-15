@@ -69,6 +69,8 @@ const selectedIds = ref(new Set())
 const clipboard = ref(null) // { mode: 'cut'|'copy', ids: string[], sourceTopicId: number }
 const selectionMode = ref(false)
 const selectionAnchor = ref(-1)
+const searchQuery = ref('')
+const categoryFilter = ref('all') // all | image | video | audio | document
 
 const videoRef = ref(null)
 const videoPlaying = ref(false)
@@ -89,7 +91,19 @@ const checking = computed(
     restoringSession.value || (auth.isAuthorized && ['idle', 'checking'].includes(vault.status)),
 )
 
-const previewableInFolder = computed(() => drive.files.filter((f) => isPreviewable(f)))
+const visibleFiles = computed(() => {
+  const q = String(searchQuery.value || '')
+    .trim()
+    .toLowerCase()
+  const cat = categoryFilter.value
+  return (drive.files || []).filter((file) => {
+    if (cat !== 'all' && file?.category !== cat) return false
+    if (!q) return true
+    const name = String(file?.name || '').toLowerCase()
+    return name.includes(q)
+  })
+})
+const previewableInFolder = computed(() => visibleFiles.value.filter((f) => isPreviewable(f)))
 const selectedCount = computed(() => selectedIds.value.size)
 const hasSelection = computed(() => selectedIds.value.size > 0)
 const showSelectionUi = computed(() => selectionMode.value || selectedIds.value.size > 0)
@@ -183,7 +197,9 @@ let thumbTimer = null
 function scheduleThumbs() {
   if (thumbTimer) clearTimeout(thumbTimer)
   thumbTimer = setTimeout(async () => {
-    const items = (drive.files || []).filter((item) => canThumb(item) && !thumbUrls.value[item.id])
+    const items = (visibleFiles.value || []).filter(
+      (item) => canThumb(item) && !thumbUrls.value[item.id],
+    )
     for (const item of items.slice(0, 12)) {
       await ensureThumb(item)
     }
@@ -214,14 +230,15 @@ function isSelected(id) {
   return selectedIds.value.has(id)
 }
 function itemIndex(id) {
-  return drive.files.findIndex((f) => f.id === id)
+  return visibleFiles.value.findIndex((f) => f.id === id)
 }
 function setSelectionRange(from, to) {
+  const list = visibleFiles.value
   const start = Math.max(0, Math.min(from, to))
-  const end = Math.min(drive.files.length - 1, Math.max(from, to))
+  const end = Math.min(list.length - 1, Math.max(from, to))
   const next = new Set()
   for (let i = start; i <= end; i += 1) {
-    if (drive.files[i]?.id) next.add(drive.files[i].id)
+    if (list[i]?.id) next.add(list[i].id)
   }
   selectedIds.value = next
   if (next.size) selectionMode.value = true
@@ -242,7 +259,7 @@ function clearSelection() {
   selectionAnchor.value = -1
 }
 function selectAllCurrent() {
-  selectedIds.value = new Set((drive.files || []).map((f) => f.id).filter(Boolean))
+  selectedIds.value = new Set((visibleFiles.value || []).map((f) => f.id).filter(Boolean))
   if (selectedIds.value.size) {
     selectionMode.value = true
     selectionAnchor.value = 0
@@ -451,7 +468,7 @@ function onGlobalKey(e) {
   const key = e.key.toLowerCase()
 
   if (meta && key === 'a') {
-    if (drive.files.length) {
+    if (visibleFiles.value.length) {
       e.preventDefault()
       selectAllCurrent()
     }
@@ -480,7 +497,7 @@ function onGlobalKey(e) {
   }
 
   if (e.shiftKey && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-    if (!drive.files.length) return
+    if (!visibleFiles.value.length) return
     e.preventDefault()
     let anchor = selectionAnchor.value
     if (anchor < 0) anchor = 0
@@ -494,7 +511,7 @@ function onGlobalKey(e) {
       }
     }
     const delta = e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 1
-    const next = Math.max(0, Math.min(drive.files.length - 1, cursor + delta))
+    const next = Math.max(0, Math.min(visibleFiles.value.length - 1, cursor + delta))
     setSelectionRange(anchor, next)
     selectionAnchor.value = anchor
   }
@@ -699,7 +716,7 @@ watch(
   },
 )
 watch(
-  () => [drive.files, drive.selectedTopicId, ready.value],
+  () => [drive.files, drive.selectedTopicId, ready.value, searchQuery.value, categoryFilter.value],
   () => {
     if (ready.value) scheduleThumbs()
   },
@@ -711,6 +728,8 @@ watch(
   () => {
     clearSelection()
     selectionAnchor.value = -1
+    searchQuery.value = ''
+    categoryFilter.value = 'all'
   },
 )
 
@@ -822,7 +841,8 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <p class="text-xs text-muted-foreground">
-            {{ drive.files.length }} items · encrypted on this device
+            {{ visibleFiles.length }} shown · {{ drive.files.length }} items · encrypted on this
+            device
           </p>
         </div>
 
@@ -857,7 +877,7 @@ onBeforeUnmount(() => {
           </div>
 
           <AppButton
-            v-if="showSelectionUi && drive.files.length"
+            v-if="showSelectionUi && visibleFiles.length"
             variant="outline"
             size="md"
             :disabled="!ready || drive.filesLoading"
@@ -914,6 +934,37 @@ onBeforeUnmount(() => {
         class="rounded-lg border border-red-500/20 bg-red-500/5 p-3 text-xs text-red-200"
       >
         {{ actionError || drive.error || vault.error }}
+      </div>
+
+      <div v-if="ready && drive.selectedTopicId" class="flex flex-wrap items-center gap-2">
+        <input
+          v-model="searchQuery"
+          type="search"
+          placeholder="Search files..."
+          class="h-9 min-w-[180px] flex-1 rounded-lg border border-input bg-background/60 px-3 text-sm focus-ring"
+        />
+        <div class="flex flex-wrap items-center gap-1">
+          <button
+            v-for="opt in [
+              { id: 'all', label: 'All' },
+              { id: 'image', label: 'Images' },
+              { id: 'video', label: 'Videos' },
+              { id: 'audio', label: 'Audio' },
+              { id: 'document', label: 'Documents' },
+            ]"
+            :key="opt.id"
+            type="button"
+            class="rounded-lg px-2.5 py-1.5 text-xs transition-colors"
+            :class="
+              categoryFilter === opt.id
+                ? 'bg-white/10 text-foreground'
+                : 'text-muted-foreground hover:bg-white/5 hover:text-foreground'
+            "
+            @click="categoryFilter = opt.id"
+          >
+            {{ opt.label }}
+          </button>
+        </div>
       </div>
 
       <div
@@ -988,14 +1039,20 @@ onBeforeUnmount(() => {
 
           <div
             v-else-if="
-              !drive.files.length && !drive.uploadTask?.running && !drive.uploadTask?.error
+              !visibleFiles.length && !drive.uploadTask?.running && !drive.uploadTask?.error
             "
             class="rounded-xl border border-dashed border-white/10 px-6 py-16 text-center"
           >
             <HardDrive class="mx-auto h-10 w-10 text-muted-foreground/40" />
-            <p class="mt-3 text-sm font-medium">This folder is empty</p>
+            <p class="mt-3 text-sm font-medium">
+              {{ drive.files.length ? 'No matching files' : 'This folder is empty' }}
+            </p>
             <p class="mt-1 text-xs text-muted-foreground">
-              Use <strong>+ New → Upload files</strong> to add encrypted files.
+              {{
+                drive.files.length
+                  ? 'Try a different search or category filter.'
+                  : 'Use + New → Upload files to add encrypted files.'
+              }}
             </p>
           </div>
 
@@ -1048,7 +1105,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div
-              v-for="item in drive.files"
+              v-for="item in visibleFiles"
               :key="item.id"
               class="group relative overflow-hidden rounded-xl border bg-white/[0.02] transition-colors hover:bg-white/[0.05]"
               :class="
@@ -1154,7 +1211,7 @@ onBeforeUnmount(() => {
               </button>
             </li>
             <li
-              v-for="item in drive.files"
+              v-for="item in visibleFiles"
               :key="item.id"
               class="flex items-center gap-3 px-3 py-2.5 hover:bg-white/[0.03]"
               :class="isSelected(item.id) ? 'bg-sky-400/[0.06]' : ''"
@@ -1392,14 +1449,14 @@ onBeforeUnmount(() => {
         <ClipboardPaste class="h-4 w-4" /> Paste
       </button>
       <button
-        v-if="drive.files.length"
+        v-if="visibleFiles.length"
         class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
         @click="ctxSelectAll()"
       >
         Select all
       </button>
       <div
-        v-if="!hasClipboard && !drive.files.length"
+        v-if="!hasClipboard && !visibleFiles.length"
         class="px-3 py-2 text-sm text-muted-foreground"
       >
         No actions

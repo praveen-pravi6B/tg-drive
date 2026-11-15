@@ -2,7 +2,7 @@
 
 An encrypted, serverless drive that stores files in **your own private Telegram forum supergroup**. No backend, no database, no account to create — the browser talks MTProto directly to Telegram.
 
-> **Status: M3 in progress.** Vault recovery (M1), a basic drive UI (M2), and an encrypted drive index snapshot in `#index` are in place. Folders map to topics, uploads are chunked/encrypted with vault-derived keys, manifests are stored per file, and the index snapshot caches folder/file metadata for faster loading. Event log, local IndexedDB cache, search, previews and trash are still to come. Treat this as a development build, not a backup product.
+> **Status: M3 in progress.** Vault recovery (M1), a basic drive UI (M2), and an encrypted drive index snapshot in `#index` are in place. Folders map to topics, uploads are chunked/encrypted with vault-derived keys, manifests are stored per file, and the index snapshot caches folder/file metadata for faster loading. Local IndexedDB caching now includes the encrypted index snapshot (fast load/fallback) and decrypted media blobs (1-day cache), and previews/grid-list/search+category filter/multi-select/copy-cut-paste/queued uploads are available. Event log, MiniSearch/global search, and trash/retention are still to come. Treat this as a development build, not a backup product.
 
 ---
 
@@ -200,13 +200,13 @@ The GitHub repo is ready for a later “Connect to Git” step: push the repo, t
 
 ## Known limitations
 
-- Drive index snapshot is implemented (`i.bin` in `#index`), but there is no event log, local IndexedDB cache, or MiniSearch yet.
+- Drive index snapshot is implemented (`i.bin` in `#index`) and locally cached in IndexedDB (encrypted snapshot) for faster load/fallback, but there is no event log or MiniSearch yet.
 - File listing may still scan a folder’s manifests on first visit/migration and then persist them into the snapshot.
-- No search, previews, trash/30-day retention, or resumable/retry-heavy uploads yet.
+- No search, trash/30-day retention, or resumable/retry-heavy uploads yet (previews and queued multi-file uploads are supported).
 - The M0 spike lab still uses its own ephemeral keys/path; normal uploads go through the vault-derived file keys.
 - Losing the vault passphrase means the drive cannot be recovered.
-- Clearing browser storage loses the session; the drive and vault are re-discovered from Telegram after signing in again.
-- 200 MB per file and one upload at a time; Telegram rate limits still apply per chat.
+- Clearing browser storage loses the session and local caches; the drive and vault are re-discovered from Telegram after signing in again.
+- 200 MB per file; uploads are processed sequentially in a queue and Telegram rate limits still apply per chat.
 - “Archived” means the group is placed in your client's Archive folder; the app never deletes the group.
 - Telegram channel/supergroup limits and account restrictions can change without notice.
 - Low-severity npm advisories exist in the dev-only `vite-plugin-node-polyfills` dependency tree; production dependencies audit clean.
