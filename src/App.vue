@@ -102,14 +102,6 @@ onBeforeUnmount(() => {
             <HardDrive class="h-3.5 w-3.5" />
             Drive
           </RouterLink>
-          <RouterLink
-            to="/debug"
-            class="focus-ring flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
-            :class="route.name === 'debug' && 'bg-white/5 text-foreground'"
-          >
-            <Terminal class="h-3.5 w-3.5" />
-            Spike lab
-          </RouterLink>
         </nav>
 
         <div class="ml-auto flex items-center gap-2">

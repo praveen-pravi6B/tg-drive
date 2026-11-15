@@ -61,9 +61,6 @@ export const limits = {
 
 export const storageKeys = {
   session: 'tgdrive.session.v1',
-  debugGroup: 'tgdrive.debug.group.v1',
-  debugTopic: 'tgdrive.debug.topic.v1',
-  debugDriveId: 'tgdrive.debug.driveid.v1',
   drive: 'tgdrive.drive.v1',
   vault: 'tgdrive.vault.v1',
   vaultUnlock: 'tgdrive.vault.unlock.v1',

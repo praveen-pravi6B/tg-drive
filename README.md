@@ -37,8 +37,6 @@ Browser (Vue 3 + GramJS, MTProto over WSS)
 
 Argon2id defaults are 64 MiB, 3 passes and a 16-byte random salt; parameters live in the envelope, so they can be raised later without breaking existing vaults. Rewriting the vault replaces the previous envelope and deletes it, so `#index` holds exactly one.
 
-The M0 spike lab still uses ephemeral keys for its round-trip; the vault is what makes files recoverable across reloads and devices.
-
 ---
 
 ## Security warnings
@@ -120,20 +118,6 @@ The envelope is plaintext JSON containing only public parameters (`v`, `driveId`
 
 ---
 
-## M0 spike lab (`/debug`)
-
-The lab proves the storage primitives against your real account:
-
-1. **Find or create group** — creates the forum supergroup once, archives it, disables forwarding. **Verify** re-reads the `tgdrive:` marker; running it again must not create a second group.
-2. **Topics** — create/select a topic, refresh the topic list.
-3. **Message probe** — send a small document into the topic, read it back, delete it.
-4. **Encrypted chunk round-trip** — choose a file up to 200 MB, pick a chunk size, upload encrypted chunks, download them, decrypt, and compare SHA-256 hashes. Optionally delete the chunk messages afterwards.
-5. **Live log** — every Telegram call and error, including flood waits, is visible in the right-hand panel.
-
-Suggested first run: a 20–50 MB file with the default 20 MB chunk size, then a full 200 MB file once the small round-trip is green.
-
----
-
 ## Project layout
 
 ```
@@ -142,7 +126,7 @@ src/
   polyfills.js            Buffer/process globals for GramJS
   lib/
     config.js             env credentials, limits, storage keys
-    logger.js             in-memory logger used by the spike lab
+    logger.js             in-memory logger
     utils.js              formatting helpers
     crypto/bytes.js       base64/hex/random helpers
     crypto/kdf.js         HKDF, Argon2id/PBKDF2 KEKs, AES-GCM
@@ -159,7 +143,7 @@ src/
   stores/auth.js          GramJS client lifecycle, QR/phone auth
   stores/vault.js         vault lifecycle; master key in module scope only
   stores/drive.js         folders/topics, upload queue, file listing/actions
-  views/                  Login, Drive, Vault, Spike lab, 404
+  views/                  Login, Drive, Vault, 404
   components/ui/          small Tailwind UI primitives
   workers/crypto.worker.js WebCrypto worker (keys never leave the device)
 ```
@@ -203,7 +187,6 @@ The GitHub repo is ready for a later “Connect to Git” step: push the repo, t
 - Drive index snapshot is implemented (`i.bin` in `#index`) and locally cached in IndexedDB (encrypted snapshot) for faster load/fallback. Encrypted event log entries are appended to `#index` and a recent event trail is included in the snapshot; search uses MiniSearch globally/in-folder.
 - File listing may still scan a folder’s manifests on first visit/migration and then persist them into the snapshot.
 - In-folder and global file search (MiniSearch, "All folders") with category filtering are available. Uploads/downloads and key Telegram operations include automatic flood-wait handling and per-chunk retry/backoff for resilience (with upload retry status). Encrypted event entries are appended to `#index` and a recent event trail is persisted in the encrypted index snapshot. Interrupted uploads can be resumed across refresh by re-selecting the same file (matching name/size/modified time in the same folder). Trash (soft delete, restore, permanent delete, empty trash, 30-day auto-purge) is supported.
-- The M0 spike lab still uses its own ephemeral keys/path; normal uploads go through the vault-derived file keys.
 - Losing the vault passphrase means the drive cannot be recovered.
 - Clearing browser storage loses the session and local caches; the drive and vault are re-discovered from Telegram after signing in again.
 - 200 MB per file; uploads are processed sequentially in a queue and Telegram rate limits still apply per chat.

@@ -49,17 +49,6 @@ function parseDriveId(about) {
 export function loadDriveState() {
   const canonical = readJson(storageKeys.drive)
   if (canonical?.channel?.id) return canonical
-
-  // Adopt the M0 spike lab's group so an upgrade never creates a duplicate.
-  const spikeGroup = readJson(storageKeys.debugGroup)
-  if (spikeGroup?.id) {
-    return {
-      driveId: localStorage.getItem(storageKeys.debugDriveId) || spikeGroup.driveId || '',
-      channel: toChannel(spikeGroup),
-      indexTopicId: 0,
-    }
-  }
-
   return null
 }
 
@@ -69,9 +58,6 @@ export function saveDriveState(state) {
 
 export function clearDriveState() {
   localStorage.removeItem(storageKeys.drive)
-  localStorage.removeItem(storageKeys.debugGroup)
-  localStorage.removeItem(storageKeys.debugTopic)
-  localStorage.removeItem(storageKeys.debugDriveId)
 }
 
 async function verifyChannel(client, channel) {

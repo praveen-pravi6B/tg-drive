@@ -21,11 +21,6 @@ const routes = [
     component: () => import('@/views/VaultView.vue'),
   },
   {
-    path: '/debug',
-    name: 'debug',
-    component: () => import('@/views/DebugView.vue'),
-  },
-  {
     path: '/:pathMatch(.*)*',
     name: 'not-found',
     component: () => import('@/views/NotFoundView.vue'),
