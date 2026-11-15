@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import {
   ChevronLeft,
   ChevronRight,
@@ -17,6 +17,7 @@ import {
   HardDrive,
   KeyRound,
   LayoutGrid,
+  Link2,
   List,
   LoaderCircle,
   LockOpen,
@@ -44,6 +45,7 @@ import AppInput from '@/components/ui/AppInput.vue'
 const auth = useAuthStore()
 const drive = useDriveStore()
 const vault = useVaultStore()
+const route = useRoute()
 
 const viewMode = ref('grid') // grid | list
 const newMenuOpen = ref(false)
@@ -389,6 +391,18 @@ function ctxCut(item) {
   selectionAnchor.value = itemIndex(item.id)
   closeContextMenu()
 }
+async function ctxCopyLink(item) {
+  if (!item?.id) return
+  try {
+    const url = new URL('/drive', window.location.origin)
+    url.searchParams.set('file', String(item.id))
+    await navigator.clipboard.writeText(url.toString())
+  } catch (error) {
+    actionError.value = 'Could not copy link'
+  } finally {
+    closeContextMenu()
+  }
+}
 function ctxToggleSelect(item) {
   if (!item) return
   if (!isSelected(item.id)) selectionMode.value = true
@@ -700,6 +714,27 @@ watch(
   },
 )
 
+let openedLinkedFile = false
+async function maybeOpenLinkedFile() {
+  if (openedLinkedFile) return
+  const fileId = typeof route.query.file === 'string' ? route.query.file : ''
+  if (!fileId || !ready.value || !drive.allFiles.length) return
+  const manifest = drive.allFiles.find((f) => f.id === fileId)
+  if (!manifest) return
+  openedLinkedFile = true
+  if (Number(manifest.folderTopicId) && Number(manifest.folderTopicId) !== drive.selectedTopicId) {
+    await drive.selectFolder(manifest.folderTopicId)
+  }
+  if (isPreviewable(manifest)) openPreview(manifest)
+}
+
+watch(
+  () => [ready.value, drive.allFiles.length, route.query.file],
+  () => {
+    maybeOpenLinkedFile().catch(() => {})
+  },
+)
+
 onMounted(async () => {
   window.addEventListener('click', onGlobalClick)
   window.addEventListener('keydown', onGlobalKey)
@@ -707,6 +742,7 @@ onMounted(async () => {
     await vault.init()
     if (vault.status === 'unlocked') await drive.init()
   }
+  await maybeOpenLinkedFile()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('click', onGlobalClick)
@@ -1311,6 +1347,12 @@ onBeforeUnmount(() => {
       </button>
       <button
         class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+        @click="ctxCopyLink(contextMenu.item)"
+      >
+        <Link2 class="h-4 w-4" /> Copy link
+      </button>
+      <button
+        class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
         @click="ctxDownload(contextMenu.item)"
       >
         <Download class="h-4 w-4" /> Download
@@ -1450,7 +1492,10 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="relative flex min-h-0 flex-1 items-center justify-center p-4">
+    <div
+      class="relative flex min-h-0 flex-1 items-center justify-center p-4"
+      @click.self="closePreview"
+    >
       <div v-if="preview.loading" class="flex items-center gap-3 text-sm text-white/70">
         <LoaderCircle class="h-5 w-5 animate-spin text-sky-300" />
         Downloading and decrypting…
