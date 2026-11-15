@@ -614,13 +614,13 @@ function openNewFolder() {
   folderError.value = ''
   nextTick(() => document.getElementById('new-folder-input')?.focus?.())
 }
-async function onFilePicked(event) {
-  const [file] = event.target.files || []
+function onFilePicked(event) {
+  const files = Array.from(event.target.files || [])
   event.target.value = ''
-  if (!file) return
+  if (!files.length) return
   actionError.value = ''
   try {
-    await drive.upload(file)
+    drive.enqueueUploads(files)
   } catch (error) {
     actionError.value = error.message
   }
@@ -852,11 +852,11 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5 disabled:opacity-40"
-                :disabled="!drive.selectedTopicId || drive.isUploading"
+                :disabled="!drive.selectedTopicId || drive.isBatchRunning"
                 @click="pickFile"
               >
                 <Upload class="h-4 w-4 text-sky-300" />
-                Upload file
+                Upload files
               </button>
               <button
                 type="button"
@@ -869,7 +869,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <input ref="fileInput" type="file" class="hidden" @change="onFilePicked" />
+          <input ref="fileInput" type="file" class="hidden" multiple @change="onFilePicked" />
         </div>
       </div>
 
@@ -938,7 +938,12 @@ onBeforeUnmount(() => {
 
         <div v-else @contextmenu.prevent="openBackgroundMenu($event)">
           <div
-            v-if="drive.filesLoading && !drive.files.length && !drive.uploadTask?.running"
+            v-if="
+              drive.filesLoading &&
+              !drive.files.length &&
+              !drive.uploadTask?.running &&
+              !drive.uploadTask?.error
+            "
             class="flex items-center gap-3 py-16 text-sm text-muted-foreground"
           >
             <LoaderCircle class="h-4 w-4 animate-spin text-sky-300" />
@@ -946,13 +951,15 @@ onBeforeUnmount(() => {
           </div>
 
           <div
-            v-else-if="!drive.files.length && !drive.uploadTask?.running"
+            v-else-if="
+              !drive.files.length && !drive.uploadTask?.running && !drive.uploadTask?.error
+            "
             class="rounded-xl border border-dashed border-white/10 px-6 py-16 text-center"
           >
             <HardDrive class="mx-auto h-10 w-10 text-muted-foreground/40" />
             <p class="mt-3 text-sm font-medium">This folder is empty</p>
             <p class="mt-1 text-xs text-muted-foreground">
-              Use <strong>+ New → Upload file</strong> to add encrypted files.
+              Use <strong>+ New → Upload files</strong> to add encrypted files.
             </p>
           </div>
 
@@ -961,26 +968,45 @@ onBeforeUnmount(() => {
             class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
           >
             <div
-              v-if="drive.uploadTask?.running"
-              class="relative overflow-hidden rounded-xl border border-sky-400/20 bg-sky-400/[0.04]"
+              v-if="drive.uploadTask?.running || drive.uploadTask?.error"
+              class="relative overflow-hidden rounded-xl border"
+              :class="
+                drive.uploadTask?.error
+                  ? 'border-red-500/20 bg-red-500/[0.04]'
+                  : 'border-sky-400/20 bg-sky-400/[0.04]'
+              "
             >
               <div class="grid aspect-[4/3] w-full place-items-center bg-black/20">
-                <LoaderCircle class="h-8 w-8 animate-spin text-sky-300" />
+                <LoaderCircle
+                  v-if="drive.uploadTask?.running"
+                  class="h-8 w-8 animate-spin text-sky-300"
+                />
+                <X v-else class="h-8 w-8 text-red-300" />
               </div>
               <div class="p-2.5">
                 <div class="truncate text-sm font-medium" :title="drive.uploadTask.fileName">
                   {{ drive.uploadTask.fileName || 'Uploading…' }}
                 </div>
                 <div
-                  class="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-muted-foreground"
+                  class="mt-0.5 flex items-center justify-between gap-2 text-[11px]"
+                  :class="drive.uploadTask?.error ? 'text-red-300' : 'text-muted-foreground'"
                 >
-                  <span>Uploading…</span>
+                  <span class="truncate">
+                    {{
+                      drive.uploadTask?.error
+                        ? drive.uploadTask.error
+                        : `Uploading…${drive.uploadQueueCount ? ` (${drive.uploadQueueCount} queued)` : ''}`
+                    }}
+                  </span>
                   <button
                     type="button"
-                    class="text-sky-300 hover:text-sky-200"
-                    @click="drive.cancelUpload()"
+                    class="shrink-0 hover:underline"
+                    :class="
+                      drive.uploadTask?.error ? 'text-red-200' : 'text-sky-300 hover:text-sky-200'
+                    "
+                    @click="drive.uploadTask?.error ? drive.clearUpload() : drive.cancelUpload()"
                   >
-                    Cancel
+                    {{ drive.uploadTask?.error ? 'Dismiss' : 'Cancel' }}
                   </button>
                 </div>
               </div>
@@ -1048,24 +1074,47 @@ onBeforeUnmount(() => {
             v-else
             class="divide-y divide-white/5 rounded-xl border border-white/5 bg-white/[0.01]"
           >
-            <li v-if="drive.uploadTask?.running" class="flex items-center gap-3 px-3 py-2.5">
+            <li
+              v-if="drive.uploadTask?.running || drive.uploadTask?.error"
+              class="flex items-center gap-3 px-3 py-2.5"
+            >
               <span
-                class="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-sky-400/10 text-sky-300"
+                class="grid h-10 w-10 shrink-0 place-items-center rounded-lg"
+                :class="
+                  drive.uploadTask?.error
+                    ? 'bg-red-500/10 text-red-300'
+                    : 'bg-sky-400/10 text-sky-300'
+                "
               >
-                <LoaderCircle class="h-4 w-4 animate-spin" />
+                <LoaderCircle v-if="drive.uploadTask?.running" class="h-4 w-4 animate-spin" />
+                <X v-else class="h-4 w-4" />
               </span>
               <div class="min-w-0 flex-1">
                 <div class="truncate text-sm font-medium">
                   {{ drive.uploadTask.fileName || 'Uploading…' }}
                 </div>
-                <div class="text-[11px] text-muted-foreground">Uploading…</div>
+                <div
+                  class="truncate text-[11px]"
+                  :class="drive.uploadTask?.error ? 'text-red-300' : 'text-muted-foreground'"
+                >
+                  {{
+                    drive.uploadTask?.error
+                      ? drive.uploadTask.error
+                      : `Uploading…${drive.uploadQueueCount ? ` (${drive.uploadQueueCount} queued)` : ''}`
+                  }}
+                </div>
               </div>
               <button
                 type="button"
-                class="rounded px-2 py-1 text-xs text-sky-300 hover:bg-white/5 hover:text-sky-200"
-                @click="drive.cancelUpload()"
+                class="rounded px-2 py-1 text-xs hover:bg-white/5"
+                :class="
+                  drive.uploadTask?.error
+                    ? 'text-red-200 hover:text-red-100'
+                    : 'text-sky-300 hover:text-sky-200'
+                "
+                @click="drive.uploadTask?.error ? drive.clearUpload() : drive.cancelUpload()"
               >
-                Cancel
+                {{ drive.uploadTask?.error ? 'Dismiss' : 'Cancel' }}
               </button>
             </li>
             <li

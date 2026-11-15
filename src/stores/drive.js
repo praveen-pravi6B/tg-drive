@@ -18,6 +18,9 @@ import { limits } from '@/lib/config'
 
 let uploadAbort = null
 let saveChain = Promise.resolve()
+let uploadQueue = []
+let queueProcessing = false
+let queueTopicId = 0
 
 function queueSave(task) {
   saveChain = saveChain.then(task, task)
@@ -62,6 +65,7 @@ export const useDriveStore = defineStore('drive', {
     indexMessageId: 0,
     uploadTask: null, // { fileName, fileId, progress, stage, error, done, chunksDone, chunkCount, running }
     batchTask: null, // { mode, total, done, current, running, error }
+    uploadQueueCount: 0,
   }),
 
   getters: {
@@ -76,6 +80,9 @@ export const useDriveStore = defineStore('drive', {
     reset() {
       if (uploadAbort) uploadAbort.abort()
       uploadAbort = null
+      uploadQueue = []
+      queueProcessing = false
+      queueTopicId = 0
       saveChain = Promise.resolve()
       this.$reset()
     },
@@ -288,12 +295,11 @@ export const useDriveStore = defineStore('drive', {
       }
     },
 
-    async upload(file, topicId = this.selectedTopicId) {
+    async _runUpload(file, topicId = this.selectedTopicId) {
       if (!file) throw new Error('Choose a file')
       if (file.size > limits.maxFileSize) {
         throw new Error(`Max file size is ${Math.round(limits.maxFileSize / (1024 * 1024))} MB`)
       }
-      if (this.isUploading) throw new Error('An upload is already running')
       const targetTopicId = Number(topicId)
       if (!targetTopicId) throw new Error('Create or select a folder first')
 
@@ -362,11 +368,62 @@ export const useDriveStore = defineStore('drive', {
       }
     },
 
+    async upload(file, topicId = this.selectedTopicId) {
+      if (this.isUploading) throw new Error('An upload is already running')
+      return this._runUpload(file, topicId)
+    },
+
+    async _processUploadQueue() {
+      if (queueProcessing) return
+      queueProcessing = true
+      try {
+        while (uploadQueue.length) {
+          const next = uploadQueue.shift()
+          this.uploadQueueCount = uploadQueue.length
+          if (!next?.file) continue
+          try {
+            await this._runUpload(next.file, next.topicId || queueTopicId || this.selectedTopicId)
+          } catch (error) {
+            // Stop queue on error/cancel; keep error visible in uploadTask until dismissed.
+            uploadQueue = []
+            this.uploadQueueCount = 0
+            break
+          }
+        }
+      } finally {
+        queueProcessing = false
+        this.uploadQueueCount = uploadQueue.length
+      }
+    },
+
+    enqueueUploads(files, topicId = this.selectedTopicId) {
+      const targetTopicId = Number(topicId)
+      if (!targetTopicId) throw new Error('Create or select a folder first')
+      const list = Array.from(files || []).filter(Boolean)
+      if (!list.length) return 0
+      for (const file of list) {
+        if (file.size > limits.maxFileSize) {
+          throw new Error(
+            `"${file.name || 'file'}" exceeds ${Math.round(limits.maxFileSize / (1024 * 1024))} MB`,
+          )
+        }
+        uploadQueue.push({ file, topicId: targetTopicId })
+      }
+      queueTopicId = targetTopicId
+      this.uploadQueueCount = uploadQueue.length
+      this._processUploadQueue()
+      return list.length
+    },
+
     cancelUpload() {
+      uploadQueue = []
+      this.uploadQueueCount = 0
       if (uploadAbort) uploadAbort.abort()
     },
 
     clearUpload() {
+      uploadQueue = []
+      this.uploadQueueCount = 0
       if (uploadAbort) uploadAbort.abort()
       this.uploadTask = null
     },
