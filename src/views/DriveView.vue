@@ -1,8 +1,9 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import {
   Download,
+  Eye,
   File,
   FileAudio,
   FileImage,
@@ -16,6 +17,7 @@ import {
   RefreshCw,
   Trash2,
   Upload,
+  X,
 } from '@lucide/vue'
 import { useDriveStore } from '@/stores/drive'
 import { useVaultStore } from '@/stores/vault'
@@ -34,6 +36,58 @@ const folderError = ref('')
 const actionError = ref('')
 const fileInput = ref(null)
 const busyFileId = ref('')
+const preview = ref(null) // { item, url, kind, loading, error }
+
+function isPreviewable(item) {
+  if (!item) return false
+  if (Number(item.size || 0) > limits.previewMaxSize) return false
+  const mime = String(item.mime || '').toLowerCase()
+  return (
+    item.category === 'image' ||
+    item.category === 'video' ||
+    item.category === 'audio' ||
+    mime === 'application/pdf' ||
+    item.category === 'document' && mime === 'application/pdf'
+  )
+}
+
+function previewKind(item) {
+  const mime = String(item?.mime || '').toLowerCase()
+  if (item?.category === 'image' || mime.startsWith('image/')) return 'image'
+  if (item?.category === 'video' || mime.startsWith('video/')) return 'video'
+  if (item?.category === 'audio' || mime.startsWith('audio/')) return 'audio'
+  if (mime === 'application/pdf') return 'pdf'
+  return 'other'
+}
+
+function closePreview() {
+  if (preview.value?.url) URL.revokeObjectURL(preview.value.url)
+  preview.value = null
+}
+
+async function openPreview(item) {
+  if (!isPreviewable(item)) return
+  closePreview()
+  actionError.value = ''
+  busyFileId.value = item.id
+  preview.value = { item, url: '', kind: previewKind(item), loading: true, error: '' }
+  try {
+    const blob = await drive.fetchBlob(item)
+    if (!preview.value || preview.value.item?.id !== item.id) return
+    preview.value.url = URL.createObjectURL(blob)
+  } catch (error) {
+    if (preview.value && preview.value.item?.id === item.id) {
+      preview.value.error = error.message
+    }
+  } finally {
+    if (preview.value && preview.value.item?.id === item.id) preview.value.loading = false
+    busyFileId.value = ''
+  }
+}
+
+onBeforeUnmount(() => {
+  closePreview()
+})
 
 const ready = computed(() => vault.status === 'unlocked')
 const needsVault = computed(() => ['no-vault', 'locked'].includes(vault.status))
@@ -160,7 +214,10 @@ onMounted(async () => {
           </button>
         </div>
 
-        <div v-if="ready" class="space-y-1">
+        <div
+          v-if="ready"
+          class="space-y-1"
+        >
           <button
             v-for="folder in drive.folders"
             :key="folder.id"
@@ -186,12 +243,18 @@ onMounted(async () => {
             No folders yet. Create one to start uploading.
           </p>
         </div>
-        <p v-else class="px-2 py-2 text-[11px] text-muted-foreground">
+        <p
+          v-else
+          class="px-2 py-2 text-[11px] text-muted-foreground"
+        >
           Unlock the vault to see folders.
         </p>
       </div>
 
-      <div v-if="ready" class="space-y-2 rounded-xl border border-white/5 bg-white/[0.02] p-3">
+      <div
+        v-if="ready"
+        class="space-y-2 rounded-xl border border-white/5 bg-white/[0.02] p-3"
+      >
         <div class="flex items-center gap-2 text-xs font-medium">
           <FolderPlus class="h-3.5 w-3.5 text-sky-300" />
           New folder
@@ -210,7 +273,10 @@ onMounted(async () => {
         >
           Create
         </AppButton>
-        <p v-if="folderError" class="text-[11px] text-red-300">
+        <p
+          v-if="folderError"
+          class="text-[11px] text-red-300"
+        >
           {{ folderError }}
         </p>
       </div>
@@ -221,7 +287,10 @@ onMounted(async () => {
       >
         <KeyRound class="h-3.5 w-3.5" />
         Vault
-        <AppBadge :tone="vaultBadge.tone" class="ml-auto">{{ vaultBadge.label }}</AppBadge>
+        <AppBadge
+          :tone="vaultBadge.tone"
+          class="ml-auto"
+        >{{ vaultBadge.label }}</AppBadge>
       </RouterLink>
     </aside>
 
@@ -232,7 +301,12 @@ onMounted(async () => {
             <h1 class="truncate text-lg font-semibold tracking-tight">
               {{ drive.selectedFolder?.title || 'My Drive' }}
             </h1>
-            <AppBadge tone="info" dot> M2 drive </AppBadge>
+            <AppBadge
+              tone="info"
+              dot
+            >
+              M2 drive
+            </AppBadge>
           </div>
           <p class="text-xs text-muted-foreground">
             {{ limits.maxFileSize / (1024 * 1024) }} MB per file ·
@@ -249,7 +323,12 @@ onMounted(async () => {
             <RefreshCw class="h-4 w-4" />
             Refresh
           </AppButton>
-          <input ref="fileInput" type="file" class="hidden" @change="onFilePicked" />
+          <input
+            ref="fileInput"
+            type="file"
+            class="hidden"
+            @change="onFilePicked"
+          >
           <AppButton
             :disabled="!ready || !drive.selectedTopicId || drive.isUploading"
             :title="!drive.selectedTopicId ? 'Create or select a folder first' : ''"
@@ -268,7 +347,11 @@ onMounted(async () => {
         {{ actionError || drive.error || vault.error }}
       </div>
 
-      <AppCard v-if="checking" title="Loading drive" description="Resolving the vault and group">
+      <AppCard
+        v-if="checking"
+        title="Loading drive"
+        description="Resolving the vault and group"
+      >
         <div class="flex items-center gap-3 py-4 text-sm text-muted-foreground">
           <LoaderCircle class="h-4 w-4 animate-spin text-sky-300" />
           Checking your Telegram drive…
@@ -287,7 +370,10 @@ onMounted(async () => {
               : 'Unlock your vault to derive file keys and access this drive.'
           }}
         </p>
-        <RouterLink to="/vault" class="mt-4 inline-block">
+        <RouterLink
+          to="/vault"
+          class="mt-4 inline-block"
+        >
           <AppButton>
             <KeyRound class="h-4 w-4" />
             {{ vault.status === 'no-vault' ? 'Create vault' : 'Unlock vault' }}
@@ -304,7 +390,11 @@ onMounted(async () => {
               class="flex-1"
               @keydown.enter.prevent="createFolder"
             />
-            <AppButton variant="outline" :loading="drive.creatingFolder" @click="createFolder">
+            <AppButton
+              variant="outline"
+              :loading="drive.creatingFolder"
+              @click="createFolder"
+            >
               <FolderPlus class="h-4 w-4" />
             </AppButton>
           </div>
@@ -343,13 +433,22 @@ onMounted(async () => {
               />
             </div>
             <div class="flex items-center gap-2">
-              <p v-if="drive.uploadTask.error" class="text-xs text-red-300">
+              <p
+                v-if="drive.uploadTask.error"
+                class="text-xs text-red-300"
+              >
                 {{ drive.uploadTask.error }}
               </p>
-              <p v-else-if="drive.uploadTask.done" class="text-xs text-emerald-300">
+              <p
+                v-else-if="drive.uploadTask.done"
+                class="text-xs text-emerald-300"
+              >
                 Upload complete and manifest saved.
               </p>
-              <p v-else class="text-xs text-muted-foreground">
+              <p
+                v-else
+                class="text-xs text-muted-foreground"
+              >
                 {{ Number(drive.uploadTask.chunksDone || 0) }}/{{
                   drive.uploadTask.chunkCount || '…'
                 }}
@@ -364,7 +463,12 @@ onMounted(async () => {
                 >
                   Cancel
                 </AppButton>
-                <AppButton v-else size="sm" variant="ghost" @click="drive.clearUpload()">
+                <AppButton
+                  v-else
+                  size="sm"
+                  variant="ghost"
+                  @click="drive.clearUpload()"
+                >
                   Dismiss
                 </AppButton>
               </div>
@@ -388,7 +492,13 @@ onMounted(async () => {
           :description="`${drive.files.length} item${drive.files.length === 1 ? '' : 's'}`"
         >
           <template #actions>
-            <AppBadge v-if="drive.filesLoading" tone="neutral" dot> Loading </AppBadge>
+            <AppBadge
+              v-if="drive.filesLoading"
+              tone="neutral"
+              dot
+            >
+              Loading
+            </AppBadge>
           </template>
 
           <div
@@ -404,21 +514,36 @@ onMounted(async () => {
             class="rounded-xl border border-dashed border-white/10 px-6 py-10 text-center"
           >
             <HardDrive class="mx-auto h-8 w-8 text-muted-foreground/50" />
-            <p class="mt-3 text-sm font-medium">No files yet</p>
+            <p class="mt-3 text-sm font-medium">
+              No files yet
+            </p>
             <p class="mt-1 text-xs text-muted-foreground">
               Upload a file and it will be chunked, encrypted, and stored in this folder.
             </p>
           </div>
 
-          <ul v-else class="divide-y divide-white/5">
-            <li v-for="item in drive.files" :key="item.id" class="flex items-center gap-3 py-3">
+          <ul
+            v-else
+            class="divide-y divide-white/5"
+          >
+            <li
+              v-for="item in drive.files"
+              :key="item.id"
+              class="flex items-center gap-3 py-3"
+            >
               <span
                 class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/5 text-sky-300"
               >
-                <component :is="iconFor(item.category)" class="h-4 w-4" />
+                <component
+                  :is="iconFor(item.category)"
+                  class="h-4 w-4"
+                />
               </span>
               <div class="min-w-0 flex-1">
-                <div class="truncate text-sm font-medium" :title="item.name">
+                <div
+                  class="truncate text-sm font-medium"
+                  :title="item.name"
+                >
                   {{ item.name }}
                 </div>
                 <div class="text-[11px] text-muted-foreground">
@@ -430,10 +555,21 @@ onMounted(async () => {
               </div>
               <div class="flex shrink-0 items-center gap-1">
                 <AppButton
+                  v-if="isPreviewable(item)"
+                  variant="ghost"
+                  size="icon"
+                  title="Preview"
+                  :loading="busyFileId === item.id && preview?.item?.id === item.id"
+                  :disabled="busyFileId && busyFileId !== item.id"
+                  @click="openPreview(item)"
+                >
+                  <Eye class="h-4 w-4" />
+                </AppButton>
+                <AppButton
                   variant="ghost"
                   size="icon"
                   title="Download"
-                  :loading="busyFileId === item.id"
+                  :loading="busyFileId === item.id && preview?.item?.id !== item.id ? false : busyFileId === item.id"
                   :disabled="busyFileId && busyFileId !== item.id"
                   @click="download(item)"
                 >
@@ -459,5 +595,86 @@ onMounted(async () => {
         documents use opaque ids.
       </p>
     </section>
+  </div>
+
+  <div
+    v-if="preview"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+    @click.self="closePreview"
+  >
+    <div class="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-white/10 bg-background shadow-2xl">
+      <div class="flex items-center gap-3 border-b border-white/5 px-4 py-3">
+        <div class="min-w-0 flex-1">
+          <div class="truncate text-sm font-medium">
+            {{ preview.item?.name }}
+          </div>
+          <div class="text-[11px] text-muted-foreground">
+            {{ formatBytes(preview.item?.size || 0) }} · {{ preview.item?.mime || 'file' }}
+          </div>
+        </div>
+        <AppButton
+          variant="ghost"
+          size="sm"
+          @click="download(preview.item)"
+        >
+          <Download class="h-4 w-4" />
+          Download
+        </AppButton>
+        <AppButton
+          variant="ghost"
+          size="icon"
+          title="Close"
+          @click="closePreview"
+        >
+          <X class="h-4 w-4" />
+        </AppButton>
+      </div>
+
+      <div class="flex min-h-[300px] flex-1 items-center justify-center overflow-auto bg-black/20 p-4">
+        <div
+          v-if="preview.loading"
+          class="flex items-center gap-3 text-sm text-muted-foreground"
+        >
+          <LoaderCircle class="h-5 w-5 animate-spin text-sky-300" />
+          Downloading and decrypting…
+        </div>
+        <div
+          v-else-if="preview.error"
+          class="max-w-md text-center text-sm text-red-300"
+        >
+          {{ preview.error }}
+        </div>
+        <img
+          v-else-if="preview.kind === 'image' && preview.url"
+          :src="preview.url"
+          :alt="preview.item?.name"
+          class="max-h-[70vh] max-w-full rounded object-contain"
+        >
+        <video
+          v-else-if="preview.kind === 'video' && preview.url"
+          :src="preview.url"
+          controls
+          class="max-h-[70vh] max-w-full rounded"
+        />
+        <audio
+          v-else-if="preview.kind === 'audio' && preview.url"
+          :src="preview.url"
+          controls
+          class="w-full max-w-xl"
+        />
+        <iframe
+          v-else-if="preview.kind === 'pdf' && preview.url"
+          :src="preview.url"
+          class="h-[70vh] w-full rounded bg-white"
+          title="PDF preview"
+        />
+        <div
+          v-else
+          class="text-sm text-muted-foreground"
+        >
+          Preview not available. Use Download.
+        </div>
+      </div>
+    </div>
   </div>
 </template>

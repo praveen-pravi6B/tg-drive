@@ -334,9 +334,14 @@ export const useDriveStore = defineStore('drive', {
       this.uploadTask = null
     },
 
-    async download(manifest) {
+    async fetchBlob(manifest) {
       const { client, channel, masterKey } = this.requireReady()
       const { blob } = await downloadFile({ client, channel, manifest, masterKey })
+      return blob
+    },
+
+    async download(manifest) {
+      const blob = await this.fetchBlob(manifest)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
