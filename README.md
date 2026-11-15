@@ -2,7 +2,7 @@
 
 An encrypted, serverless drive that stores files in **your own private Telegram forum supergroup**. No backend, no database, no account to create — the browser talks MTProto directly to Telegram.
 
-> **Status: M3 in progress.** Vault recovery (M1), a basic drive UI (M2), and an encrypted drive index snapshot in `#index` are in place. Folders map to topics, uploads are chunked/encrypted with vault-derived keys, manifests are stored per file, and the index snapshot caches folder/file metadata for faster loading. Local IndexedDB caching now includes the encrypted index snapshot (fast load/fallback) and decrypted media blobs (1-day cache), and previews/grid-list/search+category filter/multi-select/copy-cut-paste/queued uploads are available. Event log, MiniSearch/global search, and trash/retention are still to come. Treat this as a development build, not a backup product.
+> **Status: M3 in progress.** Vault recovery (M1), a basic drive UI (M2), and an encrypted drive index snapshot in `#index` are in place. Folders map to topics, uploads are chunked/encrypted with vault-derived keys, manifests are stored per file, and the index snapshot caches folder/file metadata for faster loading. Local IndexedDB caching now includes the encrypted index snapshot (fast load/fallback) and decrypted media blobs (1-day cache), and previews/grid-list/search+category filter (including global search across folders via MiniSearch)/multi-select/copy-cut-paste/queued uploads/trash with 30-day retention are available. Event log and resumable/retry-heavy uploads are still to come. Treat this as a development build, not a backup product.
 
 ---
 
@@ -33,7 +33,7 @@ Browser (Vue 3 + GramJS, MTProto over WSS)
 | Vault          | master key wrapped by an Argon2id KEK derived from a passphrase             |
 | Vault envelope | AES-256-GCM, AAD bound to `tgdrive:vault-v1:1:<driveId>`                    |
 | Vault location | one opaque `v.bin` document (caption `tgv1`) in the reserved `#index` topic |
-| Trash          | reserved `#trash` topic, 30-day retention (planned)                         |
+| Trash          | soft-deleted in the encrypted index with 30-day retention (restore/purge)   |
 
 Argon2id defaults are 64 MiB, 3 passes and a 16-byte random salt; parameters live in the envelope, so they can be raised later without breaking existing vaults. Rewriting the vault replaces the previous envelope and deletes it, so `#index` holds exactly one.
 
@@ -202,7 +202,7 @@ The GitHub repo is ready for a later “Connect to Git” step: push the repo, t
 
 - Drive index snapshot is implemented (`i.bin` in `#index`) and locally cached in IndexedDB (encrypted snapshot) for faster load/fallback, but there is no event log or MiniSearch yet.
 - File listing may still scan a folder’s manifests on first visit/migration and then persist them into the snapshot.
-- Basic in-folder search and category filtering are available, but no MiniSearch/global search, trash/30-day retention, or resumable/retry-heavy uploads yet (previews and queued multi-file uploads are supported).
+- Basic in-folder search and category filtering are available, but no MiniSearch/global search or resumable/retry-heavy uploads yet. Trash (soft delete, restore, permanent delete, empty trash, 30-day auto-purge) is supported.
 - The M0 spike lab still uses its own ephemeral keys/path; normal uploads go through the vault-derived file keys.
 - Losing the vault passphrase means the drive cannot be recovered.
 - Clearing browser storage loses the session and local caches; the drive and vault are re-discovered from Telegram after signing in again.

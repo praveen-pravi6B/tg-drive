@@ -36,6 +36,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { useDriveStore } from '@/stores/drive'
 import { useVaultStore } from '@/stores/vault'
+import MiniSearch from 'minisearch'
 import { MIN_PASSPHRASE_LENGTH } from '@/lib/vault/vault'
 import { formatBytes } from '@/lib/utils'
 import { limits } from '@/lib/config'
@@ -72,6 +73,7 @@ const selectionMode = ref(false)
 const selectionAnchor = ref(-1)
 const searchQuery = ref('')
 const categoryFilter = ref('all') // all | image | video | audio | document
+const searchAll = ref(false)
 
 const videoRef = ref(null)
 const videoPlaying = ref(false)
@@ -92,17 +94,54 @@ const checking = computed(
     restoringSession.value || (auth.isAuthorized && ['idle', 'checking'].includes(vault.status)),
 )
 
-const visibleFiles = computed(() => {
-  const q = String(searchQuery.value || '')
-    .trim()
-    .toLowerCase()
-  const cat = categoryFilter.value
-  return (drive.files || []).filter((file) => {
-    if (cat !== 'all' && file?.category !== cat) return false
-    if (!q) return true
-    const name = String(file?.name || '').toLowerCase()
-    return name.includes(q)
+const allActiveFiles = computed(() => (drive.allFiles || []).filter((f) => f && !f.trashedAt))
+
+const searchIndex = computed(() => {
+  const mini = new MiniSearch({
+    fields: ['name'],
+    storeFields: ['id'],
+    searchOptions: { prefix: true, fuzzy: 0.2 },
   })
+  mini.addAll(
+    allActiveFiles.value.map((f) => ({
+      id: f.id,
+      name: f.name || '',
+    })),
+  )
+  return mini
+})
+
+const visibleFiles = computed(() => {
+  const q = String(searchQuery.value || '').trim()
+  const cat = categoryFilter.value
+  const base =
+    searchAll.value && !drive.showTrash && (q || cat !== 'all')
+      ? allActiveFiles.value
+      : drive.files || []
+
+  let result = base
+  if (q) {
+    if (searchAll.value && !drive.showTrash) {
+      const hits = searchIndex.value.search(q)
+      const ids = new Set(hits.map((h) => h.id))
+      result = base.filter((f) => ids.has(f.id))
+      // preserve relevance order from MiniSearch
+      const order = new Map(hits.map((h, i) => [h.id, i]))
+      result = [...result].sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
+    } else {
+      const lower = q.toLowerCase()
+      result = base.filter((f) =>
+        String(f?.name || '')
+          .toLowerCase()
+          .includes(lower),
+      )
+    }
+  }
+
+  if (cat !== 'all') {
+    result = result.filter((file) => file?.category === cat)
+  }
+  return result
 })
 const previewableInFolder = computed(() => visibleFiles.value.filter((f) => isPreviewable(f)))
 const selectedCount = computed(() => selectedIds.value.size)
@@ -305,8 +344,11 @@ function clearClipboard() {
   clipboard.value = null
 }
 
-function openItem(item) {
+async function openItem(item) {
   if (!item) return
+  if (searchAll.value && !drive.showTrash && Number(item.folderTopicId) !== drive.selectedTopicId) {
+    await drive.selectFolder(item.folderTopicId)
+  }
   if (isPreviewable(item)) openPreview(item)
   else download(item)
 }
@@ -780,6 +822,7 @@ watch(
     selectionAnchor.value = -1
     searchQuery.value = ''
     categoryFilter.value = 'all'
+    searchAll.value = false
   },
 )
 
@@ -1018,13 +1061,20 @@ onBeforeUnmount(() => {
         {{ actionError || drive.error || vault.error }}
       </div>
 
-      <div v-if="ready && drive.selectedTopicId" class="flex flex-wrap items-center gap-2">
+      <div
+        v-if="ready && drive.selectedTopicId && !drive.showTrash"
+        class="flex flex-wrap items-center gap-2"
+      >
         <input
           v-model="searchQuery"
           type="search"
-          placeholder="Search files..."
+          :placeholder="searchAll ? 'Search all files...' : 'Search files...'"
           class="h-9 min-w-[180px] flex-1 rounded-lg border border-input bg-background/60 px-3 text-sm focus-ring"
         />
+        <label class="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <input v-model="searchAll" type="checkbox" class="h-3.5 w-3.5 accent-sky-500" />
+          All folders
+        </label>
         <div class="flex flex-wrap items-center gap-1">
           <button
             v-for="opt in [
@@ -1238,8 +1288,12 @@ onBeforeUnmount(() => {
                 <div class="truncate text-sm font-medium" :title="item.name">
                   {{ item.name }}
                 </div>
-                <div class="mt-0.5 text-[11px] text-muted-foreground">
+                <div class="mt-0.5 truncate text-[11px] text-muted-foreground">
                   {{ formatDate(item.createdAt) }}
+                  <template v-if="searchAll && item.folderTopicId">
+                    ·
+                    {{ drive.folders.find((f) => f.id === item.folderTopicId)?.title || 'Folder' }}
+                  </template>
                 </div>
               </div>
               <button
@@ -1341,8 +1395,12 @@ onBeforeUnmount(() => {
                 <div class="truncate text-sm font-medium">
                   {{ item.name }}
                 </div>
-                <div class="text-[11px] text-muted-foreground">
+                <div class="truncate text-[11px] text-muted-foreground">
                   {{ formatBytes(item.size) }} · {{ formatDate(item.createdAt) }}
+                  <template v-if="searchAll && item.folderTopicId">
+                    ·
+                    {{ drive.folders.find((f) => f.id === item.folderTopicId)?.title || 'Folder' }}
+                  </template>
                 </div>
               </button>
               <button
