@@ -66,6 +66,7 @@ const vaultRevealing = ref(false)
 const selectedIds = ref(new Set())
 const clipboard = ref(null) // { mode: 'cut'|'copy', ids: string[], sourceTopicId: number }
 const selectionMode = ref(false)
+const selectionAnchor = ref(-1)
 
 const videoRef = ref(null)
 const videoPlaying = ref(false)
@@ -210,7 +211,23 @@ async function openPreview(item) {
 function isSelected(id) {
   return selectedIds.value.has(id)
 }
+function itemIndex(id) {
+  return drive.files.findIndex((f) => f.id === id)
+}
+function setSelectionRange(from, to) {
+  const start = Math.max(0, Math.min(from, to))
+  const end = Math.min(drive.files.length - 1, Math.max(from, to))
+  const next = new Set()
+  for (let i = start; i <= end; i += 1) {
+    if (drive.files[i]?.id) next.add(drive.files[i].id)
+  }
+  selectedIds.value = next
+  if (next.size) selectionMode.value = true
+  else selectionMode.value = false
+}
 function toggleSelection(id) {
+  const idx = itemIndex(id)
+  if (idx >= 0) selectionAnchor.value = idx
   const next = new Set(selectedIds.value)
   if (next.has(id)) next.delete(id)
   else next.add(id)
@@ -220,10 +237,14 @@ function toggleSelection(id) {
 function clearSelection() {
   if (selectedIds.value.size) selectedIds.value = new Set()
   selectionMode.value = false
+  selectionAnchor.value = -1
 }
 function selectAllCurrent() {
   selectedIds.value = new Set((drive.files || []).map((f) => f.id).filter(Boolean))
-  if (selectedIds.value.size) selectionMode.value = true
+  if (selectedIds.value.size) {
+    selectionMode.value = true
+    selectionAnchor.value = 0
+  }
 }
 function copySelection() {
   const ids = [...selectedIds.value]
@@ -326,7 +347,12 @@ function fmtTime(sec) {
 
 function openContextMenu(e, item) {
   e.preventDefault()
-  contextMenu.value = { x: e.clientX, y: e.clientY, item }
+  e.stopPropagation?.()
+  contextMenu.value = { x: e.clientX, y: e.clientY, item: item || null }
+}
+function openBackgroundMenu(e) {
+  if (!ready.value || !drive.selectedTopicId) return
+  openContextMenu(e, null)
 }
 function closeContextMenu() {
   contextMenu.value = null
@@ -349,9 +375,21 @@ function ctxToggleSelect(item) {
   toggleSelection(item.id)
   closeContextMenu()
 }
+function ctxPaste() {
+  pasteClipboard()
+  closeContextMenu()
+}
+function ctxSelectAll() {
+  selectAllCurrent()
+  closeContextMenu()
+}
 function onGlobalClick() {
   closeContextMenu()
   newMenuOpen.value = false
+}
+function isTypingTarget(target) {
+  const tag = target?.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable
 }
 function onGlobalKey(e) {
   if (e.key === 'Escape') {
@@ -359,19 +397,72 @@ function onGlobalKey(e) {
     closePreview()
     newMenuOpen.value = false
     renameTarget.value = null
+    if (!preview.value) clearSelection()
+    return
   }
+
   if (preview.value) {
-    if (
-      preview.value.kind === 'video' &&
-      e.key === ' ' &&
-      e.target?.tagName !== 'INPUT' &&
-      e.target?.tagName !== 'TEXTAREA'
-    ) {
+    if (preview.value.kind === 'video' && e.key === ' ' && !isTypingTarget(e.target)) {
       e.preventDefault()
       togglePlay()
     }
     if (e.key === 'ArrowRight' && canNext()) goNext()
     if (e.key === 'ArrowLeft' && canPrev()) goPrev()
+    return
+  }
+
+  if (isTypingTarget(e.target) || renameTarget.value || !ready.value) return
+
+  const meta = e.ctrlKey || e.metaKey
+  const key = e.key.toLowerCase()
+
+  if (meta && key === 'a') {
+    if (drive.files.length) {
+      e.preventDefault()
+      selectAllCurrent()
+    }
+    return
+  }
+  if (meta && key === 'c') {
+    if (selectedCount.value) {
+      e.preventDefault()
+      copySelection()
+    }
+    return
+  }
+  if (meta && key === 'x') {
+    if (selectedCount.value) {
+      e.preventDefault()
+      cutSelection()
+    }
+    return
+  }
+  if (meta && key === 'v') {
+    if (hasClipboard.value && drive.selectedTopicId) {
+      e.preventDefault()
+      pasteClipboard()
+    }
+    return
+  }
+
+  if (e.shiftKey && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+    if (!drive.files.length) return
+    e.preventDefault()
+    let anchor = selectionAnchor.value
+    if (anchor < 0) anchor = 0
+    let cursor = anchor
+    // extend from current end of selection if any, else anchor
+    if (selectedIds.value.size) {
+      const indices = [...selectedIds.value].map(itemIndex).filter((i) => i >= 0)
+      if (indices.length) {
+        cursor =
+          e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? Math.min(...indices) : Math.max(...indices)
+      }
+    }
+    const delta = e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 1
+    const next = Math.max(0, Math.min(drive.files.length - 1, cursor + delta))
+    setSelectionRange(anchor, next)
+    selectionAnchor.value = anchor
   }
 }
 
@@ -551,6 +642,7 @@ watch(
   () => drive.selectedTopicId,
   () => {
     clearSelection()
+    selectionAnchor.value = -1
   },
 )
 
@@ -734,76 +826,6 @@ onBeforeUnmount(() => {
       </div>
 
       <div
-        v-if="hasSelection || hasClipboard || drive.batchTask"
-        class="flex flex-wrap items-center gap-2 rounded-xl border border-sky-400/20 bg-sky-400/[0.05] p-2.5 text-xs"
-      >
-        <template v-if="hasSelection">
-          <span class="font-medium text-sky-200">{{ selectedCount }} selected</span>
-          <AppButton
-            size="sm"
-            variant="outline"
-            :disabled="drive.isBatchRunning"
-            @click="copySelection"
-          >
-            <Copy class="h-3.5 w-3.5" /> Copy
-          </AppButton>
-          <AppButton
-            size="sm"
-            variant="outline"
-            :disabled="drive.isBatchRunning"
-            @click="cutSelection"
-          >
-            <Scissors class="h-3.5 w-3.5" /> Cut
-          </AppButton>
-          <AppButton size="sm" variant="ghost" @click="clearSelection">Clear</AppButton>
-        </template>
-        <div v-if="hasClipboard" class="ml-auto flex items-center gap-2">
-          <span class="text-muted-foreground">
-            {{ clipboard.mode === 'cut' ? 'Cut' : 'Copied' }} {{ clipboardCount }} item(s)
-          </span>
-          <AppButton
-            size="sm"
-            :disabled="!drive.selectedTopicId || drive.isBatchRunning || drive.isUploading"
-            @click="pasteClipboard"
-          >
-            <ClipboardPaste class="h-3.5 w-3.5" /> Paste here
-          </AppButton>
-          <AppButton
-            size="sm"
-            variant="ghost"
-            :disabled="drive.isBatchRunning"
-            @click="clearClipboard"
-          >
-            Cancel
-          </AppButton>
-        </div>
-        <div v-if="drive.batchTask" class="flex w-full items-center gap-2 text-muted-foreground">
-          <LoaderCircle
-            v-if="drive.batchTask.running"
-            class="h-3.5 w-3.5 animate-spin text-sky-300"
-          />
-          <span>
-            {{
-              drive.batchTask.running
-                ? `${drive.batchTask.mode === 'cut' ? 'Moving' : 'Copying'} ${drive.batchTask.done}/${drive.batchTask.total}: ${drive.batchTask.current || ''}`
-                : drive.batchTask.error
-                  ? `Paste failed: ${drive.batchTask.error}`
-                  : `${drive.batchTask.mode === 'cut' ? 'Moved' : 'Copied'} ${drive.batchTask.done}/${drive.batchTask.total}`
-            }}
-          </span>
-          <AppButton
-            v-if="!drive.batchTask.running"
-            size="sm"
-            variant="ghost"
-            class="ml-auto"
-            @click="drive.clearBatchTask()"
-          >
-            Dismiss
-          </AppButton>
-        </div>
-      </div>
-
-      <div
         v-if="showNewFolder"
         class="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.02] p-3"
       >
@@ -859,7 +881,7 @@ onBeforeUnmount(() => {
           </p>
         </AppCard>
 
-        <div v-else>
+        <div v-else @contextmenu.prevent="openBackgroundMenu($event)">
           <div
             v-if="drive.filesLoading && !drive.files.length && !drive.uploadTask?.running"
             class="flex items-center gap-3 py-16 text-sm text-muted-foreground"
@@ -1129,38 +1151,69 @@ onBeforeUnmount(() => {
     @click.stop
     @contextmenu.prevent
   >
-    <button
-      class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
-      @click="ctxOpen(contextMenu.item)"
-    >
-      <Eye class="h-4 w-4" /> Open
-    </button>
-    <button
-      class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
-      :disabled="selectedCount > 1"
-      @click="startRename(contextMenu.item)"
-    >
-      <Pencil class="h-4 w-4" /> Rename
-    </button>
-    <button
-      class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
-      @click="ctxToggleSelect(contextMenu.item)"
-    >
-      <Copy class="h-4 w-4" />
-      {{ isSelected(contextMenu.item.id) ? 'Unselect' : 'Select file' }}
-    </button>
-    <button
-      class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
-      @click="ctxDownload(contextMenu.item)"
-    >
-      <Download class="h-4 w-4" /> Download
-    </button>
-    <button
-      class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10"
-      @click="ctxDelete(contextMenu.item)"
-    >
-      <Trash2 class="h-4 w-4" /> Delete
-    </button>
+    <template v-if="contextMenu.item">
+      <button
+        class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+        @click="ctxOpen(contextMenu.item)"
+      >
+        <Eye class="h-4 w-4" /> Open
+      </button>
+      <button
+        class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+        :disabled="selectedCount > 1"
+        @click="startRename(contextMenu.item)"
+      >
+        <Pencil class="h-4 w-4" /> Rename
+      </button>
+      <button
+        class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+        @click="ctxToggleSelect(contextMenu.item)"
+      >
+        <Copy class="h-4 w-4" />
+        {{ isSelected(contextMenu.item.id) ? 'Unselect' : 'Select file' }}
+      </button>
+      <button
+        v-if="hasClipboard && drive.selectedTopicId"
+        class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+        @click="ctxPaste()"
+      >
+        <ClipboardPaste class="h-4 w-4" /> Paste
+      </button>
+      <button
+        class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+        @click="ctxDownload(contextMenu.item)"
+      >
+        <Download class="h-4 w-4" /> Download
+      </button>
+      <button
+        class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10"
+        @click="ctxDelete(contextMenu.item)"
+      >
+        <Trash2 class="h-4 w-4" /> Delete
+      </button>
+    </template>
+    <template v-else>
+      <button
+        v-if="hasClipboard && drive.selectedTopicId"
+        class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+        @click="ctxPaste()"
+      >
+        <ClipboardPaste class="h-4 w-4" /> Paste
+      </button>
+      <button
+        v-if="drive.files.length"
+        class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+        @click="ctxSelectAll()"
+      >
+        Select all
+      </button>
+      <div
+        v-if="!hasClipboard && !drive.files.length"
+        class="px-3 py-2 text-sm text-muted-foreground"
+      >
+        No actions
+      </div>
+    </template>
   </div>
 
   <!-- Rename dialog -->
