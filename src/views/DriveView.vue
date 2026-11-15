@@ -940,13 +940,20 @@ onBeforeUnmount(() => {
               @contextmenu="openContextMenu($event, item)"
             >
               <div v-if="showSelectionUi" class="absolute left-1.5 top-1.5 z-10">
-                <input
-                  type="checkbox"
-                  class="h-4 w-4 rounded-full border-white/30 bg-black/50 accent-sky-500"
-                  :checked="isSelected(item.id)"
-                  @click.stop
-                  @change="toggleSelection(item.id)"
-                />
+                <button
+                  type="button"
+                  class="grid h-5 w-5 place-items-center rounded-full border backdrop-blur transition-colors"
+                  :class="
+                    isSelected(item.id)
+                      ? 'border-sky-400 bg-sky-500'
+                      : 'border-white/40 bg-black/40 hover:border-white/70'
+                  "
+                  @click.stop="toggleSelection(item.id)"
+                  :aria-pressed="isSelected(item.id)"
+                  title="Select"
+                >
+                  <span v-if="isSelected(item.id)" class="h-2 w-2 rounded-full bg-white"></span>
+                </button>
               </div>
               <button
                 type="button"
@@ -1013,14 +1020,21 @@ onBeforeUnmount(() => {
               :class="isSelected(item.id) ? 'bg-sky-400/[0.06]' : ''"
               @contextmenu="openContextMenu($event, item)"
             >
-              <input
+              <button
                 v-if="showSelectionUi"
-                type="checkbox"
-                class="h-4 w-4 shrink-0 rounded-full border-white/30 bg-black/40 accent-sky-500"
-                :checked="isSelected(item.id)"
-                @click.stop
-                @change="toggleSelection(item.id)"
-              />
+                type="button"
+                class="grid h-5 w-5 shrink-0 place-items-center rounded-full border transition-colors"
+                :class="
+                  isSelected(item.id)
+                    ? 'border-sky-400 bg-sky-500'
+                    : 'border-white/30 bg-black/30 hover:border-white/60'
+                "
+                @click.stop="toggleSelection(item.id)"
+                :aria-pressed="isSelected(item.id)"
+                title="Select"
+              >
+                <span v-if="isSelected(item.id)" class="h-2 w-2 rounded-full bg-white"></span>
+              </button>
               <button
                 type="button"
                 class="shrink-0 overflow-hidden rounded-lg"
