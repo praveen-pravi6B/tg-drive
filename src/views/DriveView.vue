@@ -676,51 +676,13 @@ onBeforeUnmount(() => {
       </AppCard>
 
       <template v-else-if="ready">
-        <AppCard
-          v-if="drive.uploadTask"
-          :title="`Upload: ${drive.uploadTask.fileName || 'file'}`"
-          description="Encrypted on this device before sending"
+        <div
+          v-if="drive.uploadTask?.error"
+          class="flex items-center gap-3 rounded-lg border border-red-500/20 bg-red-500/5 p-3 text-xs text-red-200"
         >
-          <div class="space-y-2">
-            <div class="flex items-center justify-between text-xs text-muted-foreground">
-              <span class="capitalize">{{ drive.uploadTask.stage || 'starting' }}</span>
-              <span>{{ Number(drive.uploadTask.progress || 0) }}%</span>
-            </div>
-            <div class="h-2 overflow-hidden rounded-full bg-white/5">
-              <div
-                class="h-full rounded-full bg-sky-400 transition-all"
-                :style="{ width: `${Number(drive.uploadTask.progress || 0)}%` }"
-              />
-            </div>
-            <div class="flex items-center gap-2">
-              <p v-if="drive.uploadTask.error" class="text-xs text-red-300">
-                {{ drive.uploadTask.error }}
-              </p>
-              <p v-else-if="drive.uploadTask.done" class="text-xs text-emerald-300">
-                Upload complete and manifest saved.
-              </p>
-              <p v-else class="text-xs text-muted-foreground">
-                {{ Number(drive.uploadTask.chunksDone || 0) }}/{{
-                  drive.uploadTask.chunkCount || '…'
-                }}
-                chunks uploaded
-              </p>
-              <div class="ml-auto flex gap-2">
-                <AppButton
-                  v-if="drive.isUploading"
-                  size="sm"
-                  variant="outline"
-                  @click="drive.cancelUpload()"
-                >
-                  Cancel
-                </AppButton>
-                <AppButton v-else size="sm" variant="ghost" @click="drive.clearUpload()">
-                  Dismiss
-                </AppButton>
-              </div>
-            </div>
-          </div>
-        </AppCard>
+          <span class="min-w-0 flex-1 truncate">Upload failed: {{ drive.uploadTask.error }}</span>
+          <AppButton size="sm" variant="ghost" @click="drive.clearUpload()">Dismiss</AppButton>
+        </div>
 
         <AppCard
           v-if="!drive.selectedTopicId"
@@ -734,7 +696,7 @@ onBeforeUnmount(() => {
 
         <div v-else>
           <div
-            v-if="drive.filesLoading && !drive.files.length"
+            v-if="drive.filesLoading && !drive.files.length && !drive.uploadTask?.running"
             class="flex items-center gap-3 py-16 text-sm text-muted-foreground"
           >
             <LoaderCircle class="h-4 w-4 animate-spin text-sky-300" />
@@ -742,7 +704,7 @@ onBeforeUnmount(() => {
           </div>
 
           <div
-            v-else-if="!drive.files.length"
+            v-else-if="!drive.files.length && !drive.uploadTask?.running"
             class="rounded-xl border border-dashed border-white/10 px-6 py-16 text-center"
           >
             <HardDrive class="mx-auto h-10 w-10 text-muted-foreground/40" />
@@ -756,6 +718,31 @@ onBeforeUnmount(() => {
             v-else-if="viewMode === 'grid'"
             class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
           >
+            <div
+              v-if="drive.uploadTask?.running"
+              class="relative overflow-hidden rounded-xl border border-sky-400/20 bg-sky-400/[0.04]"
+            >
+              <div class="grid aspect-[4/3] w-full place-items-center bg-black/20">
+                <LoaderCircle class="h-8 w-8 animate-spin text-sky-300" />
+              </div>
+              <div class="p-2.5">
+                <div class="truncate text-sm font-medium" :title="drive.uploadTask.fileName">
+                  {{ drive.uploadTask.fileName || 'Uploading…' }}
+                </div>
+                <div
+                  class="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-muted-foreground"
+                >
+                  <span>Uploading…</span>
+                  <button
+                    type="button"
+                    class="text-sky-300 hover:text-sky-200"
+                    @click="drive.cancelUpload()"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
             <div
               v-for="item in drive.files"
               :key="item.id"
@@ -800,6 +787,26 @@ onBeforeUnmount(() => {
             v-else
             class="divide-y divide-white/5 rounded-xl border border-white/5 bg-white/[0.01]"
           >
+            <li v-if="drive.uploadTask?.running" class="flex items-center gap-3 px-3 py-2.5">
+              <span
+                class="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-sky-400/10 text-sky-300"
+              >
+                <LoaderCircle class="h-4 w-4 animate-spin" />
+              </span>
+              <div class="min-w-0 flex-1">
+                <div class="truncate text-sm font-medium">
+                  {{ drive.uploadTask.fileName || 'Uploading…' }}
+                </div>
+                <div class="text-[11px] text-muted-foreground">Uploading…</div>
+              </div>
+              <button
+                type="button"
+                class="rounded px-2 py-1 text-xs text-sky-300 hover:bg-white/5 hover:text-sky-200"
+                @click="drive.cancelUpload()"
+              >
+                Cancel
+              </button>
+            </li>
             <li
               v-for="item in drive.files"
               :key="item.id"
