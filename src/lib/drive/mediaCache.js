@@ -32,7 +32,10 @@ export async function getCachedBlob(manifest) {
     const row = await database.table('blobs').get(key)
     if (!row) return null
     if (!row.expiresAt || row.expiresAt <= Date.now() || !row.blob) {
-      await database.table('blobs').delete(key).catch(() => {})
+      await database
+        .table('blobs')
+        .delete(key)
+        .catch(() => {})
       return null
     }
     return row.blob
