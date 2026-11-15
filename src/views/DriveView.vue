@@ -250,6 +250,18 @@ function openContextMenu(e, item) {
 function closeContextMenu() {
   contextMenu.value = null
 }
+function ctxOpen(item) {
+  openItem(item)
+  closeContextMenu()
+}
+function ctxDownload(item) {
+  download(item)
+  closeContextMenu()
+}
+function ctxDelete(item) {
+  removeFile(item)
+  closeContextMenu()
+}
 function onGlobalClick() {
   closeContextMenu()
   newMenuOpen.value = false
@@ -855,7 +867,7 @@ onBeforeUnmount(() => {
   >
     <button
       class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
-      @click="openItem(contextMenu.item); closeContextMenu()"
+      @click="ctxOpen(contextMenu.item)"
     >
       <Eye class="h-4 w-4" /> Open
     </button>
@@ -867,13 +879,13 @@ onBeforeUnmount(() => {
     </button>
     <button
       class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
-      @click="download(contextMenu.item); closeContextMenu()"
+      @click="ctxDownload(contextMenu.item)"
     >
       <Download class="h-4 w-4" /> Download
     </button>
     <button
       class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10"
-      @click="removeFile(contextMenu.item); closeContextMenu()"
+      @click="ctxDelete(contextMenu.item)"
     >
       <Trash2 class="h-4 w-4" /> Delete
     </button>
