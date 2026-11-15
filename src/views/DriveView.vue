@@ -393,6 +393,14 @@ function ctxDelete(item) {
   trashFile(item)
   closeContextMenu()
 }
+function ctxRestore(item) {
+  restoreFile(item)
+  closeContextMenu()
+}
+function ctxDeletePermanently(item) {
+  deletePermanentlyFile(item)
+  closeContextMenu()
+}
 function ctxCopy(item) {
   if (!item) return
   clipboard.value = { mode: 'copy', ids: [item.id], sourceTopicId: drive.selectedTopicId }
@@ -1501,19 +1509,13 @@ onBeforeUnmount(() => {
       <template v-if="drive.showTrash">
         <button
           class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
-          @click="
-            restoreFile(contextMenu.item)
-            closeContextMenu()
-          "
+          @click="ctxRestore(contextMenu.item)"
         >
           <RotateCcw class="h-4 w-4" /> Restore
         </button>
         <button
           class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10"
-          @click="
-            deletePermanentlyFile(contextMenu.item)
-            closeContextMenu()
-          "
+          @click="ctxDeletePermanently(contextMenu.item)"
         >
           <Trash2 class="h-4 w-4" /> Delete permanently
         </button>
