@@ -27,6 +27,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  RotateCcw,
   Scissors,
   Trash2,
   Upload,
@@ -389,7 +390,7 @@ function ctxDownload(item) {
   closeContextMenu()
 }
 function ctxDelete(item) {
-  removeFile(item)
+  trashFile(item)
   closeContextMenu()
 }
 function ctxCopy(item) {
@@ -475,21 +476,21 @@ function onGlobalKey(e) {
     return
   }
   if (meta && key === 'c') {
-    if (selectedCount.value) {
+    if (!drive.showTrash && selectedCount.value) {
       e.preventDefault()
       copySelection()
     }
     return
   }
   if (meta && key === 'x') {
-    if (selectedCount.value) {
+    if (!drive.showTrash && selectedCount.value) {
       e.preventDefault()
       cutSelection()
     }
     return
   }
   if (meta && key === 'v') {
-    if (hasClipboard.value && drive.selectedTopicId) {
+    if (!drive.showTrash && hasClipboard.value && drive.selectedTopicId) {
       e.preventDefault()
       pasteClipboard()
     }
@@ -669,11 +670,9 @@ async function download(manifest) {
     busyFileId.value = ''
   }
 }
-async function removeFile(manifest) {
+async function trashFile(manifest) {
   if (!manifest) return
-  const ok = window.confirm(
-    `Delete "${manifest.name}"?\n\nThis removes its encrypted chunks and manifest from Telegram.`,
-  )
+  const ok = window.confirm(`Move "${manifest.name}" to Trash?\n\nIt will be kept for 30 days.`)
   if (!ok) return
   actionError.value = ''
   busyFileId.value = manifest.id
@@ -684,6 +683,49 @@ async function removeFile(manifest) {
     actionError.value = error.message
   } finally {
     busyFileId.value = ''
+  }
+}
+async function restoreFile(manifest) {
+  if (!manifest) return
+  actionError.value = ''
+  busyFileId.value = manifest.id
+  try {
+    await drive.restore(manifest)
+  } catch (error) {
+    actionError.value = error.message
+  } finally {
+    busyFileId.value = ''
+  }
+}
+async function deletePermanentlyFile(manifest) {
+  if (!manifest) return
+  const ok = window.confirm(
+    `Delete "${manifest.name}" permanently?\n\nThis removes its encrypted chunks and manifest from Telegram.`,
+  )
+  if (!ok) return
+  actionError.value = ''
+  busyFileId.value = manifest.id
+  try {
+    await drive.deletePermanently(manifest)
+    if (preview.value?.item?.id === manifest.id) closePreview()
+  } catch (error) {
+    actionError.value = error.message
+  } finally {
+    busyFileId.value = ''
+  }
+}
+async function emptyTrashNow() {
+  const count = drive.trashFiles.length
+  if (!count) return
+  const ok = window.confirm(
+    `Empty Trash?\n\nThis permanently deletes ${count} item(s) and their encrypted chunks from Telegram.`,
+  )
+  if (!ok) return
+  actionError.value = ''
+  try {
+    await drive.emptyTrash()
+  } catch (error) {
+    actionError.value = error.message
   }
 }
 
@@ -798,7 +840,7 @@ onBeforeUnmount(() => {
             type="button"
             class="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors hover:bg-white/5"
             :class="
-              folder.id === drive.selectedTopicId
+              !drive.showTrash && folder.id === drive.selectedTopicId
                 ? 'bg-white/5 text-foreground'
                 : 'text-muted-foreground'
             "
@@ -809,6 +851,20 @@ onBeforeUnmount(() => {
               <HardDrive class="h-3 w-3" />
             </span>
             <span class="truncate">{{ folder.title }}</span>
+          </button>
+          <button
+            type="button"
+            class="mt-2 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors hover:bg-white/5"
+            :class="drive.showTrash ? 'bg-white/5 text-foreground' : 'text-muted-foreground'"
+            @click="drive.selectTrash()"
+          >
+            <span class="grid h-5 w-5 place-items-center rounded bg-white/5 text-red-300">
+              <Trash2 class="h-3 w-3" />
+            </span>
+            <span class="truncate">Trash</span>
+            <span v-if="drive.trashFiles.length" class="ml-auto text-[10px] text-muted-foreground">
+              {{ drive.trashFiles.length }}
+            </span>
           </button>
           <p
             v-if="!drive.folders.length && drive.status === 'ready'"
@@ -828,10 +884,12 @@ onBeforeUnmount(() => {
         <div class="min-w-0">
           <div class="flex items-center gap-2">
             <h1 class="truncate text-lg font-semibold tracking-tight">
-              {{ drive.selectedFolder?.title || 'My Drive' }}
+              {{ drive.showTrash ? 'Trash' : drive.selectedFolder?.title || 'My Drive' }}
             </h1>
             <button
-              v-if="drive.selectedFolder && Number(drive.selectedFolder.id) !== 1"
+              v-if="
+                !drive.showTrash && drive.selectedFolder && Number(drive.selectedFolder.id) !== 1
+              "
               type="button"
               class="rounded-md p-1.5 text-muted-foreground hover:bg-red-500/10 hover:text-red-300"
               title="Delete folder"
@@ -841,8 +899,13 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <p class="text-xs text-muted-foreground">
-            {{ visibleFiles.length }} shown · {{ drive.files.length }} items · encrypted on this
-            device
+            <template v-if="drive.showTrash">
+              {{ drive.trashFiles.length }} item(s) in trash · kept for 30 days
+            </template>
+            <template v-else>
+              {{ visibleFiles.length }} shown · {{ drive.files.length }} items · encrypted on this
+              device
+            </template>
           </p>
         </div>
 
@@ -887,6 +950,17 @@ onBeforeUnmount(() => {
           </AppButton>
 
           <AppButton
+            v-if="drive.showTrash"
+            variant="outline"
+            size="md"
+            :disabled="!ready || !drive.trashFiles.length"
+            @click="emptyTrashNow"
+          >
+            <Trash2 class="h-4 w-4" />
+            Empty trash
+          </AppButton>
+
+          <AppButton
             variant="outline"
             size="md"
             :disabled="!ready || drive.filesLoading"
@@ -895,7 +969,7 @@ onBeforeUnmount(() => {
             <RefreshCw class="h-4 w-4" />
           </AppButton>
 
-          <div class="relative">
+          <div v-if="!drive.showTrash" class="relative">
             <AppButton :disabled="!ready" @click.stop="newMenuOpen = !newMenuOpen">
               <Plus class="h-4 w-4" />
               New
@@ -1014,7 +1088,7 @@ onBeforeUnmount(() => {
         </div>
 
         <AppCard
-          v-if="!drive.selectedTopicId"
+          v-if="!drive.selectedTopicId && !drive.showTrash"
           title="Create a folder"
           description="Each folder is a Telegram forum topic in your drive group"
         >
@@ -1023,7 +1097,7 @@ onBeforeUnmount(() => {
           </p>
         </AppCard>
 
-        <div v-else @contextmenu.prevent="openBackgroundMenu($event)">
+        <div v-else @contextmenu.prevent="drive.showTrash ? null : openBackgroundMenu($event)">
           <div
             v-if="
               drive.filesLoading &&
@@ -1034,7 +1108,7 @@ onBeforeUnmount(() => {
             class="flex items-center gap-3 py-16 text-sm text-muted-foreground"
           >
             <LoaderCircle class="h-4 w-4 animate-spin text-sky-300" />
-            Reading encrypted manifests…
+            {{ drive.showTrash ? 'Loading trash…' : 'Reading encrypted manifests…' }}
           </div>
 
           <div
@@ -1045,13 +1119,21 @@ onBeforeUnmount(() => {
           >
             <HardDrive class="mx-auto h-10 w-10 text-muted-foreground/40" />
             <p class="mt-3 text-sm font-medium">
-              {{ drive.files.length ? 'No matching files' : 'This folder is empty' }}
+              {{
+                drive.showTrash
+                  ? 'Trash is empty'
+                  : drive.files.length
+                    ? 'No matching files'
+                    : 'This folder is empty'
+              }}
             </p>
             <p class="mt-1 text-xs text-muted-foreground">
               {{
-                drive.files.length
-                  ? 'Try a different search or category filter.'
-                  : 'Use + New → Upload files to add encrypted files.'
+                drive.showTrash
+                  ? 'Deleted files will appear here for 30 days before being removed permanently.'
+                  : drive.files.length
+                    ? 'Try a different search or category filter.'
+                    : 'Use + New → Upload files to add encrypted files.'
               }}
             </p>
           </div>
@@ -1369,39 +1451,41 @@ onBeforeUnmount(() => {
       >
         <Eye class="h-4 w-4" /> Open
       </button>
-      <button
-        class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
-        :disabled="selectedCount > 1"
-        @click="startRename(contextMenu.item)"
-      >
-        <Pencil class="h-4 w-4" /> Rename
-      </button>
-      <button
-        class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
-        @click="ctxToggleSelect(contextMenu.item)"
-      >
-        <Copy class="h-4 w-4" />
-        {{ isSelected(contextMenu.item.id) ? 'Unselect' : 'Select file' }}
-      </button>
-      <button
-        class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
-        @click="ctxCopy(contextMenu.item)"
-      >
-        <Copy class="h-4 w-4" /> Copy
-      </button>
-      <button
-        class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
-        @click="ctxCut(contextMenu.item)"
-      >
-        <Scissors class="h-4 w-4" /> Cut
-      </button>
-      <button
-        v-if="hasClipboard && drive.selectedTopicId"
-        class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
-        @click="ctxPaste()"
-      >
-        <ClipboardPaste class="h-4 w-4" /> Paste
-      </button>
+      <template v-if="!drive.showTrash">
+        <button
+          class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+          :disabled="selectedCount > 1"
+          @click="startRename(contextMenu.item)"
+        >
+          <Pencil class="h-4 w-4" /> Rename
+        </button>
+        <button
+          class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+          @click="ctxToggleSelect(contextMenu.item)"
+        >
+          <Copy class="h-4 w-4" />
+          {{ isSelected(contextMenu.item.id) ? 'Unselect' : 'Select file' }}
+        </button>
+        <button
+          class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+          @click="ctxCopy(contextMenu.item)"
+        >
+          <Copy class="h-4 w-4" /> Copy
+        </button>
+        <button
+          class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+          @click="ctxCut(contextMenu.item)"
+        >
+          <Scissors class="h-4 w-4" /> Cut
+        </button>
+        <button
+          v-if="hasClipboard && drive.selectedTopicId"
+          class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+          @click="ctxPaste()"
+        >
+          <ClipboardPaste class="h-4 w-4" /> Paste
+        </button>
+      </template>
       <button
         class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
         @click="ctxCopyLink(contextMenu.item)"
@@ -1414,11 +1498,32 @@ onBeforeUnmount(() => {
       >
         <Download class="h-4 w-4" /> Download
       </button>
+      <template v-if="drive.showTrash">
+        <button
+          class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+          @click="
+            restoreFile(contextMenu.item)
+            closeContextMenu()
+          "
+        >
+          <RotateCcw class="h-4 w-4" /> Restore
+        </button>
+        <button
+          class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10"
+          @click="
+            deletePermanentlyFile(contextMenu.item)
+            closeContextMenu()
+          "
+        >
+          <Trash2 class="h-4 w-4" /> Delete permanently
+        </button>
+      </template>
       <button
+        v-else
         class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10"
         @click="ctxDelete(contextMenu.item)"
       >
-        <Trash2 class="h-4 w-4" /> Delete
+        <Trash2 class="h-4 w-4" /> Move to Trash
       </button>
     </template>
 
@@ -1442,7 +1547,7 @@ onBeforeUnmount(() => {
 
     <template v-else>
       <button
-        v-if="hasClipboard && drive.selectedTopicId"
+        v-if="!drive.showTrash && hasClipboard && drive.selectedTopicId"
         class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
         @click="ctxPaste()"
       >
@@ -1456,7 +1561,7 @@ onBeforeUnmount(() => {
         Select all
       </button>
       <div
-        v-if="!hasClipboard && !visibleFiles.length"
+        v-if="(!hasClipboard || drive.showTrash) && !visibleFiles.length"
         class="px-3 py-2 text-sm text-muted-foreground"
       >
         No actions

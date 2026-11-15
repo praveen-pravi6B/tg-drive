@@ -202,7 +202,7 @@ The GitHub repo is ready for a later “Connect to Git” step: push the repo, t
 
 - Drive index snapshot is implemented (`i.bin` in `#index`) and locally cached in IndexedDB (encrypted snapshot) for faster load/fallback, but there is no event log or MiniSearch yet.
 - File listing may still scan a folder’s manifests on first visit/migration and then persist them into the snapshot.
-- No search, trash/30-day retention, or resumable/retry-heavy uploads yet (previews and queued multi-file uploads are supported).
+- Basic in-folder search and category filtering are available, but no MiniSearch/global search, trash/30-day retention, or resumable/retry-heavy uploads yet (previews and queued multi-file uploads are supported).
 - The M0 spike lab still uses its own ephemeral keys/path; normal uploads go through the vault-derived file keys.
 - Losing the vault passphrase means the drive cannot be recovered.
 - Clearing browser storage loses the session and local caches; the drive and vault are re-discovered from Telegram after signing in again.

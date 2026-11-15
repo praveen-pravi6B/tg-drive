@@ -58,6 +58,7 @@ export const useDriveStore = defineStore('drive', {
     error: '',
     folders: [],
     selectedTopicId: 0,
+    showTrash: false,
     allFiles: [],
     files: [],
     filesLoading: false,
@@ -75,6 +76,11 @@ export const useDriveStore = defineStore('drive', {
     },
     isUploading: (state) => Boolean(state.uploadTask?.running),
     isBatchRunning: (state) => Boolean(state.batchTask?.running),
+    trashFiles(state) {
+      return (state.allFiles || [])
+        .filter((file) => file?.trashedAt)
+        .sort((a, b) => String(b.trashedAt || '').localeCompare(String(a.trashedAt || '')))
+    },
   },
 
   actions: {
@@ -116,12 +122,18 @@ export const useDriveStore = defineStore('drive', {
     },
 
     syncSelectedFiles() {
+      if (this.showTrash) {
+        this.files = this.trashFiles
+        return
+      }
       if (!this.selectedTopicId) {
         this.files = []
         return
       }
       this.files = this.allFiles
-        .filter((file) => Number(file.folderTopicId) === Number(this.selectedTopicId))
+        .filter(
+          (file) => !file?.trashedAt && Number(file.folderTopicId) === Number(this.selectedTopicId),
+        )
         .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
     },
 
@@ -304,6 +316,7 @@ export const useDriveStore = defineStore('drive', {
           if (!this.files.length) await this.refreshFiles({ persist: false })
         }
 
+        this.purgeExpiredTrash().catch(() => {})
         this.status = 'ready'
       } catch (error) {
         this.status = 'error'
@@ -339,6 +352,7 @@ export const useDriveStore = defineStore('drive', {
     },
 
     async selectFolder(topicId) {
+      this.showTrash = false
       this.selectedTopicId = Number(topicId) || 0
       this.syncSelectedFiles()
       if (this.selectedTopicId && !this.files.length) {
@@ -346,9 +360,18 @@ export const useDriveStore = defineStore('drive', {
       }
     },
 
+    async selectTrash() {
+      this.showTrash = true
+      this.syncSelectedFiles()
+    },
+
     mergeFilesForTopic(topicId, manifests) {
+      const trashedInTopic = this.allFiles.filter(
+        (file) => Number(file.folderTopicId) === Number(topicId) && file?.trashedAt,
+      )
       const others = this.allFiles.filter((file) => Number(file.folderTopicId) !== Number(topicId))
-      this.allFiles = [...others, ...manifests]
+      const activeManifests = (manifests || []).filter((file) => !file?.trashedAt)
+      this.allFiles = [...others, ...trashedInTopic, ...activeManifests]
       this.syncSelectedFiles()
     },
 
@@ -552,11 +575,84 @@ export const useDriveStore = defineStore('drive', {
     },
 
     async remove(manifest) {
+      if (!manifest?.id) return
+      // Soft delete: move to trash (30-day retention).
+      this.allFiles = this.allFiles.map((file) =>
+        file.id === manifest.id
+          ? {
+              ...file,
+              trashedAt: file.trashedAt || new Date().toISOString(),
+              trashedFromTopicId: file.folderTopicId,
+            }
+          : file,
+      )
+      this.syncSelectedFiles()
+      await this.saveIndex()
+    },
+
+    async restore(manifest) {
+      if (!manifest?.id) return
+      const targetFolderId = Number(manifest.trashedFromTopicId || manifest.folderTopicId)
+      const folderExists = this.folders.some((f) => f.id === targetFolderId)
+      const restoreTo = folderExists ? targetFolderId : this.folders[0]?.id || targetFolderId
+      this.allFiles = this.allFiles.map((file) =>
+        file.id === manifest.id
+          ? { ...file, trashedAt: '', trashedFromTopicId: 0, folderTopicId: restoreTo }
+          : file,
+      )
+      this.syncSelectedFiles()
+      await this.saveIndex()
+    },
+
+    async deletePermanently(manifest) {
+      if (!manifest?.id) return
       const { client, channel } = this.requireReady()
       await deleteFile({ client, channel, manifest })
       this.allFiles = this.allFiles.filter((file) => file.id !== manifest.id)
       this.syncSelectedFiles()
       await this.saveIndex()
+    },
+
+    async purgeExpiredTrash() {
+      const retentionMs = Number(limits.trashRetentionDays || 30) * 24 * 60 * 60 * 1000
+      const cutoff = Date.now() - retentionMs
+      const expired = this.allFiles.filter((file) => {
+        if (!file?.trashedAt) return false
+        const t = new Date(file.trashedAt).getTime()
+        return Number.isFinite(t) && t < cutoff
+      })
+      if (!expired.length) return 0
+      const { client, channel } = this.requireReady()
+      for (const file of expired) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await deleteFile({ client, channel, manifest: file })
+          this.allFiles = this.allFiles.filter((item) => item.id !== file.id)
+        } catch (error) {
+          log('warn', 'drive', 'Could not purge expired trashed file', error)
+        }
+      }
+      this.syncSelectedFiles()
+      await this.saveIndex()
+      return expired.length
+    },
+
+    async emptyTrash() {
+      const trashed = this.allFiles.filter((file) => file?.trashedAt)
+      if (!trashed.length) return 0
+      const { client, channel } = this.requireReady()
+      for (const file of trashed) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await deleteFile({ client, channel, manifest: file })
+          this.allFiles = this.allFiles.filter((item) => item.id !== file.id)
+        } catch (error) {
+          log('warn', 'drive', 'Could not permanently delete trashed file', error)
+        }
+      }
+      this.syncSelectedFiles()
+      await this.saveIndex()
+      return trashed.length
     },
 
     async deleteFolder(topicId) {
@@ -565,7 +661,7 @@ export const useDriveStore = defineStore('drive', {
       if (folderId === 1) throw new Error('Home folder cannot be deleted')
       const { client, channel } = this.requireReady()
 
-      // Remove files in this folder from the encrypted index state.
+      // Remove files in this folder from the encrypted index state (including trashed).
       this.allFiles = this.allFiles.filter((file) => Number(file.folderTopicId) !== folderId)
       this.folders = this.folders.filter((folder) => folder.id !== folderId)
 
@@ -605,7 +701,7 @@ export const useDriveStore = defineStore('drive', {
     async pasteFiles({ mode, manifests, targetTopicId }) {
       const target = Number(targetTopicId)
       if (!target) throw new Error('Select a destination folder')
-      const items = (manifests || []).filter(Boolean)
+      const items = (manifests || []).filter((m) => m && !m.trashedAt)
       if (!items.length) return
       if (this.isUploading || this.isBatchRunning) throw new Error('Another operation is running')
 
