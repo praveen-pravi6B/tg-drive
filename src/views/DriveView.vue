@@ -439,7 +439,9 @@ onBeforeUnmount(() => {
     <aside class="hidden w-60 shrink-0 space-y-5 lg:block">
       <div class="space-y-2">
         <div class="flex items-center justify-between px-2">
-          <div class="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Folders</div>
+          <div class="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            Folders
+          </div>
           <button
             type="button"
             class="rounded p-1 text-muted-foreground hover:bg-white/5 hover:text-foreground disabled:opacity-40"
@@ -457,7 +459,11 @@ onBeforeUnmount(() => {
             :key="folder.id"
             type="button"
             class="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors hover:bg-white/5"
-            :class="folder.id === drive.selectedTopicId ? 'bg-white/5 text-foreground' : 'text-muted-foreground'"
+            :class="
+              folder.id === drive.selectedTopicId
+                ? 'bg-white/5 text-foreground'
+                : 'text-muted-foreground'
+            "
             @click="drive.selectFolder(folder.id)"
           >
             <span class="grid h-5 w-5 place-items-center rounded bg-white/5 text-sky-300">
@@ -465,11 +471,16 @@ onBeforeUnmount(() => {
             </span>
             <span class="truncate">{{ folder.title }}</span>
           </button>
-          <p v-if="!drive.folders.length && drive.status === 'ready'" class="px-2 py-2 text-[11px] text-muted-foreground">
+          <p
+            v-if="!drive.folders.length && drive.status === 'ready'"
+            class="px-2 py-2 text-[11px] text-muted-foreground"
+          >
             No folders yet. Use + New to create one.
           </p>
         </div>
-        <p v-else class="px-2 py-2 text-[11px] text-muted-foreground">Unlock the vault to see folders.</p>
+        <p v-else class="px-2 py-2 text-[11px] text-muted-foreground">
+          Unlock the vault to see folders.
+        </p>
       </div>
 
       <RouterLink
@@ -485,8 +496,12 @@ onBeforeUnmount(() => {
     <section class="min-w-0 flex-1 space-y-5">
       <div class="flex flex-wrap items-center gap-3">
         <div class="min-w-0">
-          <h1 class="truncate text-lg font-semibold tracking-tight">{{ drive.selectedFolder?.title || 'My Drive' }}</h1>
-          <p class="text-xs text-muted-foreground">{{ drive.files.length }} items · encrypted on this device</p>
+          <h1 class="truncate text-lg font-semibold tracking-tight">
+            {{ drive.selectedFolder?.title || 'My Drive' }}
+          </h1>
+          <p class="text-xs text-muted-foreground">
+            {{ drive.files.length }} items · encrypted on this device
+          </p>
         </div>
 
         <div class="ml-auto flex items-center gap-2">
@@ -494,7 +509,11 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="rounded-md p-1.5"
-              :class="viewMode === 'grid' ? 'bg-white/10 text-foreground' : 'text-muted-foreground hover:text-foreground'"
+              :class="
+                viewMode === 'grid'
+                  ? 'bg-white/10 text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              "
               title="Grid view"
               @click="viewMode = 'grid'"
             >
@@ -503,7 +522,11 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="rounded-md p-1.5"
-              :class="viewMode === 'list' ? 'bg-white/10 text-foreground' : 'text-muted-foreground hover:text-foreground'"
+              :class="
+                viewMode === 'list'
+                  ? 'bg-white/10 text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              "
               title="List view"
               @click="viewMode = 'list'"
             >
@@ -511,7 +534,12 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <AppButton variant="outline" size="md" :disabled="!ready || drive.filesLoading" @click="drive.refreshFiles()">
+          <AppButton
+            variant="outline"
+            size="md"
+            :disabled="!ready || drive.filesLoading"
+            @click="drive.refreshFiles()"
+          >
             <RefreshCw class="h-4 w-4" />
           </AppButton>
 
@@ -545,15 +573,21 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <input ref="fileInput" type="file" class="hidden" @change="onFilePicked" >
+          <input ref="fileInput" type="file" class="hidden" @change="onFilePicked" />
         </div>
       </div>
 
-      <div v-if="actionError || drive.error || (vault.error && vault.status !== 'locked')" class="rounded-lg border border-red-500/20 bg-red-500/5 p-3 text-xs text-red-200">
+      <div
+        v-if="actionError || drive.error || (vault.error && vault.status !== 'locked')"
+        class="rounded-lg border border-red-500/20 bg-red-500/5 p-3 text-xs text-red-200"
+      >
         {{ actionError || drive.error || vault.error }}
       </div>
 
-      <div v-if="showNewFolder" class="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.02] p-3">
+      <div
+        v-if="showNewFolder"
+        class="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.02] p-3"
+      >
         <FolderPlus class="h-4 w-4 text-sky-300" />
         <input
           id="new-folder-input"
@@ -562,8 +596,10 @@ onBeforeUnmount(() => {
           class="h-9 flex-1 rounded-lg border border-input bg-background/60 px-3 text-sm focus-ring"
           @keydown.enter.prevent="createFolder"
           @keydown.esc="showNewFolder = false"
+        />
+        <AppButton size="sm" :loading="drive.creatingFolder" @click="createFolder"
+          >Create</AppButton
         >
-        <AppButton size="sm" :loading="drive.creatingFolder" @click="createFolder">Create</AppButton>
         <AppButton size="sm" variant="ghost" @click="showNewFolder = false">Cancel</AppButton>
         <span v-if="folderError" class="text-xs text-red-300">{{ folderError }}</span>
       </div>
@@ -587,15 +623,35 @@ onBeforeUnmount(() => {
               <span>{{ Number(drive.uploadTask.progress || 0) }}%</span>
             </div>
             <div class="h-2 overflow-hidden rounded-full bg-white/5">
-              <div class="h-full rounded-full bg-sky-400 transition-all" :style="{ width: `${Number(drive.uploadTask.progress || 0)}%` }" />
+              <div
+                class="h-full rounded-full bg-sky-400 transition-all"
+                :style="{ width: `${Number(drive.uploadTask.progress || 0)}%` }"
+              />
             </div>
             <div class="flex items-center gap-2">
-              <p v-if="drive.uploadTask.error" class="text-xs text-red-300">{{ drive.uploadTask.error }}</p>
-              <p v-else-if="drive.uploadTask.done" class="text-xs text-emerald-300">Upload complete and manifest saved.</p>
-              <p v-else class="text-xs text-muted-foreground">{{ Number(drive.uploadTask.chunksDone || 0) }}/{{ drive.uploadTask.chunkCount || '…' }} chunks uploaded</p>
+              <p v-if="drive.uploadTask.error" class="text-xs text-red-300">
+                {{ drive.uploadTask.error }}
+              </p>
+              <p v-else-if="drive.uploadTask.done" class="text-xs text-emerald-300">
+                Upload complete and manifest saved.
+              </p>
+              <p v-else class="text-xs text-muted-foreground">
+                {{ Number(drive.uploadTask.chunksDone || 0) }}/{{
+                  drive.uploadTask.chunkCount || '…'
+                }}
+                chunks uploaded
+              </p>
               <div class="ml-auto flex gap-2">
-                <AppButton v-if="drive.isUploading" size="sm" variant="outline" @click="drive.cancelUpload()">Cancel</AppButton>
-                <AppButton v-else size="sm" variant="ghost" @click="drive.clearUpload()">Dismiss</AppButton>
+                <AppButton
+                  v-if="drive.isUploading"
+                  size="sm"
+                  variant="outline"
+                  @click="drive.cancelUpload()"
+                  >Cancel</AppButton
+                >
+                <AppButton v-else size="sm" variant="ghost" @click="drive.clearUpload()"
+                  >Dismiss</AppButton
+                >
               </div>
             </div>
           </div>
@@ -606,22 +662,35 @@ onBeforeUnmount(() => {
           title="Create a folder"
           description="Each folder is a Telegram forum topic in your drive group"
         >
-          <p class="text-sm text-muted-foreground">Use <strong>+ New → New folder</strong> to create a folder, then upload files into it.</p>
+          <p class="text-sm text-muted-foreground">
+            Use <strong>+ New → New folder</strong> to create a folder, then upload files into it.
+          </p>
         </AppCard>
 
         <div v-else>
-          <div v-if="drive.filesLoading && !drive.files.length" class="flex items-center gap-3 py-16 text-sm text-muted-foreground">
+          <div
+            v-if="drive.filesLoading && !drive.files.length"
+            class="flex items-center gap-3 py-16 text-sm text-muted-foreground"
+          >
             <LoaderCircle class="h-4 w-4 animate-spin text-sky-300" />
             Reading encrypted manifests…
           </div>
 
-          <div v-else-if="!drive.files.length" class="rounded-xl border border-dashed border-white/10 px-6 py-16 text-center">
+          <div
+            v-else-if="!drive.files.length"
+            class="rounded-xl border border-dashed border-white/10 px-6 py-16 text-center"
+          >
             <HardDrive class="mx-auto h-10 w-10 text-muted-foreground/40" />
             <p class="mt-3 text-sm font-medium">This folder is empty</p>
-            <p class="mt-1 text-xs text-muted-foreground">Use <strong>+ New → Upload file</strong> to add encrypted files.</p>
+            <p class="mt-1 text-xs text-muted-foreground">
+              Use <strong>+ New → Upload file</strong> to add encrypted files.
+            </p>
           </div>
 
-          <div v-else-if="viewMode === 'grid'" class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          <div
+            v-else-if="viewMode === 'grid'"
+            class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+          >
             <div
               v-for="item in drive.files"
               :key="item.id"
@@ -638,14 +707,16 @@ onBeforeUnmount(() => {
                   :src="thumbUrls[item.id]"
                   :alt="item.name"
                   class="h-full w-full object-cover"
-                >
+                />
                 <span v-else class="grid h-full w-full place-items-center text-sky-300/80">
                   <component :is="iconFor(item.category)" class="h-10 w-10" />
                 </span>
               </button>
               <div class="p-2.5">
                 <div class="truncate text-sm font-medium" :title="item.name">{{ item.name }}</div>
-                <div class="mt-0.5 text-[11px] text-muted-foreground">{{ formatDate(item.createdAt) }}</div>
+                <div class="mt-0.5 text-[11px] text-muted-foreground">
+                  {{ formatDate(item.createdAt) }}
+                </div>
               </div>
               <button
                 type="button"
@@ -658,24 +729,42 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <ul v-else class="divide-y divide-white/5 rounded-xl border border-white/5 bg-white/[0.01]">
+          <ul
+            v-else
+            class="divide-y divide-white/5 rounded-xl border border-white/5 bg-white/[0.01]"
+          >
             <li
               v-for="item in drive.files"
               :key="item.id"
               class="flex items-center gap-3 px-3 py-2.5 hover:bg-white/[0.03]"
               @contextmenu="openContextMenu($event, item)"
             >
-              <button type="button" class="shrink-0 overflow-hidden rounded-lg" @click="openItem(item)">
-                <img v-if="thumbUrls[item.id]" :src="thumbUrls[item.id]" :alt="item.name" class="h-10 w-10 object-cover">
+              <button
+                type="button"
+                class="shrink-0 overflow-hidden rounded-lg"
+                @click="openItem(item)"
+              >
+                <img
+                  v-if="thumbUrls[item.id]"
+                  :src="thumbUrls[item.id]"
+                  :alt="item.name"
+                  class="h-10 w-10 object-cover"
+                />
                 <span v-else class="grid h-10 w-10 place-items-center bg-white/5 text-sky-300">
                   <component :is="iconFor(item.category)" class="h-4 w-4" />
                 </span>
               </button>
               <button type="button" class="min-w-0 flex-1 text-left" @click="openItem(item)">
                 <div class="truncate text-sm font-medium">{{ item.name }}</div>
-                <div class="text-[11px] text-muted-foreground">{{ formatBytes(item.size) }} · {{ formatDate(item.createdAt) }}</div>
+                <div class="text-[11px] text-muted-foreground">
+                  {{ formatBytes(item.size) }} · {{ formatDate(item.createdAt) }}
+                </div>
               </button>
-              <button type="button" class="rounded p-1.5 text-muted-foreground hover:bg-white/5 hover:text-foreground" @click.stop="openContextMenu($event, item)">
+              <button
+                type="button"
+                class="rounded p-1.5 text-muted-foreground hover:bg-white/5 hover:text-foreground"
+                @click.stop="openContextMenu($event, item)"
+              >
                 <MoreVertical class="h-4 w-4" />
               </button>
             </li>
@@ -683,7 +772,11 @@ onBeforeUnmount(() => {
         </div>
       </template>
 
-      <AppCard v-else-if="vault.status === 'error'" title="Could not open the vault" description="Telegram or the drive group returned an error">
+      <AppCard
+        v-else-if="vault.status === 'error'"
+        title="Could not open the vault"
+        description="Telegram or the drive group returned an error"
+      >
         <p class="text-sm text-red-200">{{ vault.error || 'Unknown error' }}</p>
         <AppButton class="mt-4" variant="outline" @click="vault.init({ force: true })">
           <RefreshCw class="h-4 w-4" />
@@ -691,37 +784,74 @@ onBeforeUnmount(() => {
         </AppButton>
       </AppCard>
 
-      <div v-else-if="needsVault" class="py-16 text-center text-sm text-muted-foreground">Unlock your drive to continue.</div>
+      <div v-else-if="needsVault" class="py-16 text-center text-sm text-muted-foreground">
+        Unlock your drive to continue.
+      </div>
     </section>
   </div>
 
   <!-- Vault modal -->
-  <div v-if="needsVault && !checking" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+  <div
+    v-if="needsVault && !checking"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+  >
     <div class="w-full max-w-md rounded-xl border border-white/10 bg-background p-5 shadow-2xl">
       <div class="flex items-center gap-2">
-        <span class="grid h-9 w-9 place-items-center rounded-lg bg-sky-400/10 text-sky-300"><KeyRound class="h-4 w-4" /></span>
+        <span class="grid h-9 w-9 place-items-center rounded-lg bg-sky-400/10 text-sky-300"
+          ><KeyRound class="h-4 w-4"
+        /></span>
         <div>
-          <h2 class="text-sm font-semibold">{{ vault.status === 'no-vault' ? 'Create your vault' : 'Unlock your drive' }}</h2>
-          <p class="text-[11px] text-muted-foreground">{{ vault.status === 'no-vault' ? 'Set a passphrase to protect your files.' : 'Enter your passphrase to continue.' }}</p>
+          <h2 class="text-sm font-semibold">
+            {{ vault.status === 'no-vault' ? 'Create your vault' : 'Unlock your drive' }}
+          </h2>
+          <p class="text-[11px] text-muted-foreground">
+            {{
+              vault.status === 'no-vault'
+                ? 'Set a passphrase to protect your files.'
+                : 'Enter your passphrase to continue.'
+            }}
+          </p>
         </div>
       </div>
-      <form class="mt-4 space-y-3" @submit.prevent="vault.status === 'no-vault' ? submitVaultCreate() : submitVaultUnlock()">
+      <form
+        class="mt-4 space-y-3"
+        @submit.prevent="vault.status === 'no-vault' ? submitVaultCreate() : submitVaultUnlock()"
+      >
         <p v-if="vault.status === 'no-vault'" class="text-xs leading-relaxed text-muted-foreground">
           Use at least {{ MIN_PASSPHRASE_LENGTH }} characters. This passphrase cannot be recovered.
         </p>
-        <AppInput v-model="vaultPassphrase" :type="vaultRevealing ? 'text' : 'password'" label="Passphrase" :autocomplete="vault.status === 'no-vault' ? 'new-password' : 'current-password'" />
-        <AppInput v-if="vault.status === 'no-vault'" v-model="vaultConfirm" :type="vaultRevealing ? 'text' : 'password'" label="Confirm passphrase" autocomplete="new-password" />
+        <AppInput
+          v-model="vaultPassphrase"
+          :type="vaultRevealing ? 'text' : 'password'"
+          label="Passphrase"
+          :autocomplete="vault.status === 'no-vault' ? 'new-password' : 'current-password'"
+        />
+        <AppInput
+          v-if="vault.status === 'no-vault'"
+          v-model="vaultConfirm"
+          :type="vaultRevealing ? 'text' : 'password'"
+          label="Confirm passphrase"
+          autocomplete="new-password"
+        />
         <label class="flex items-center gap-2 text-xs text-muted-foreground">
-          <input v-model="vaultRevealing" type="checkbox" class="h-3.5 w-3.5 rounded border-border bg-background">
+          <input
+            v-model="vaultRevealing"
+            type="checkbox"
+            class="h-3.5 w-3.5 rounded border-border bg-background"
+          />
           Show passphrase
         </label>
-        <p v-if="vaultFormError || vault.error" class="text-xs text-red-300">{{ vaultFormError || vault.error }}</p>
+        <p v-if="vaultFormError || vault.error" class="text-xs text-red-300">
+          {{ vaultFormError || vault.error }}
+        </p>
         <div class="flex items-center gap-2 pt-1">
           <AppButton type="submit" :loading="vault.busy === 'create' || vault.busy === 'unlock'">
             <LockOpen class="h-4 w-4" />
             {{ vault.status === 'no-vault' ? 'Create & unlock' : 'Unlock' }}
           </AppButton>
-          <RouterLink to="/vault" class="text-xs text-muted-foreground hover:text-foreground">Manage vault</RouterLink>
+          <RouterLink to="/vault" class="text-xs text-muted-foreground hover:text-foreground"
+            >Manage vault</RouterLink
+          >
         </div>
       </form>
     </div>
@@ -735,44 +865,108 @@ onBeforeUnmount(() => {
     @click.stop
     @contextmenu.prevent
   >
-    <button class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5" @click="openItem(contextMenu.item); closeContextMenu()">
+    <button
+      class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+      @click="openItem(contextMenu.item); closeContextMenu()"
+    >
       <Eye class="h-4 w-4" /> Open
     </button>
-    <button class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5" @click="startRename(contextMenu.item)">
+    <button
+      class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+      @click="startRename(contextMenu.item)"
+    >
       <Pencil class="h-4 w-4" /> Rename
     </button>
-    <button class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5" @click="download(contextMenu.item); closeContextMenu()">
+    <button
+      class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+      @click="download(contextMenu.item); closeContextMenu()"
+    >
       <Download class="h-4 w-4" /> Download
     </button>
-    <button class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10" @click="removeFile(contextMenu.item); closeContextMenu()">
+    <button
+      class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10"
+      @click="removeFile(contextMenu.item); closeContextMenu()"
+    >
       <Trash2 class="h-4 w-4" /> Delete
     </button>
   </div>
 
   <!-- Rename dialog -->
-  <div v-if="renameTarget" class="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" @click.self="renameTarget = null">
-    <form class="w-full max-w-sm rounded-xl border border-white/10 bg-background p-4 shadow-xl" @submit.prevent="submitRename">
+  <div
+    v-if="renameTarget"
+    class="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+    @click.self="renameTarget = null"
+  >
+    <form
+      class="w-full max-w-sm rounded-xl border border-white/10 bg-background p-4 shadow-xl"
+      @submit.prevent="submitRename"
+    >
       <h3 class="text-sm font-semibold">Rename</h3>
-      <input id="rename-input" v-model="renameValue" class="mt-3 h-10 w-full rounded-lg border border-input bg-background/60 px-3 text-sm focus-ring">
+      <input
+        id="rename-input"
+        v-model="renameValue"
+        class="mt-3 h-10 w-full rounded-lg border border-input bg-background/60 px-3 text-sm focus-ring"
+      />
       <div class="mt-4 flex justify-end gap-2">
-        <AppButton type="button" variant="ghost" size="sm" @click="renameTarget = null">Cancel</AppButton>
-        <AppButton type="submit" size="sm" :loading="busyFileId === renameTarget?.id">Save</AppButton>
+        <AppButton type="button" variant="ghost" size="sm" @click="renameTarget = null"
+          >Cancel</AppButton
+        >
+        <AppButton type="submit" size="sm" :loading="busyFileId === renameTarget?.id"
+          >Save</AppButton
+        >
       </div>
     </form>
   </div>
 
   <!-- Preview / viewer -->
-  <div v-if="preview" class="fixed inset-0 z-50 flex flex-col bg-black/95" @click.self="closePreview" @contextmenu.prevent>
+  <div
+    v-if="preview"
+    class="fixed inset-0 z-50 flex flex-col bg-black/95"
+    @click.self="closePreview"
+    @contextmenu.prevent
+  >
     <div class="flex items-center gap-3 border-b border-white/10 px-4 py-3">
       <div class="min-w-0 flex-1">
         <div class="truncate text-sm font-medium text-white">{{ preview.item?.name }}</div>
         <div class="text-[11px] text-white/60">{{ formatBytes(preview.item?.size || 0) }}</div>
       </div>
       <div class="flex items-center gap-1">
-        <button v-if="previewableInFolder.length > 1" type="button" class="rounded p-2 text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30" :disabled="!canPrev()" title="Previous" @click="goPrev"><ChevronLeft class="h-5 w-5" /></button>
-        <button v-if="previewableInFolder.length > 1" type="button" class="rounded p-2 text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30" :disabled="!canNext()" title="Next" @click="goNext"><ChevronRight class="h-5 w-5" /></button>
-        <button type="button" class="rounded p-2 text-white/70 hover:bg-white/10 hover:text-white" title="Download" @click="download(preview.item)"><Download class="h-5 w-5" /></button>
-        <button type="button" class="rounded p-2 text-white/70 hover:bg-white/10 hover:text-white" title="Close" @click="closePreview"><X class="h-5 w-5" /></button>
+        <button
+          v-if="previewableInFolder.length > 1"
+          type="button"
+          class="rounded p-2 text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30"
+          :disabled="!canPrev()"
+          title="Previous"
+          @click="goPrev"
+        >
+          <ChevronLeft class="h-5 w-5" />
+        </button>
+        <button
+          v-if="previewableInFolder.length > 1"
+          type="button"
+          class="rounded p-2 text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30"
+          :disabled="!canNext()"
+          title="Next"
+          @click="goNext"
+        >
+          <ChevronRight class="h-5 w-5" />
+        </button>
+        <button
+          type="button"
+          class="rounded p-2 text-white/70 hover:bg-white/10 hover:text-white"
+          title="Download"
+          @click="download(preview.item)"
+        >
+          <Download class="h-5 w-5" />
+        </button>
+        <button
+          type="button"
+          class="rounded p-2 text-white/70 hover:bg-white/10 hover:text-white"
+          title="Close"
+          @click="closePreview"
+        >
+          <X class="h-5 w-5" />
+        </button>
       </div>
     </div>
 
@@ -781,7 +975,9 @@ onBeforeUnmount(() => {
         <LoaderCircle class="h-5 w-5 animate-spin text-sky-300" />
         Downloading and decrypting…
       </div>
-      <div v-else-if="preview.error" class="max-w-md text-center text-sm text-red-300">{{ preview.error }}</div>
+      <div v-else-if="preview.error" class="max-w-md text-center text-sm text-red-300">
+        {{ preview.error }}
+      </div>
 
       <img
         v-else-if="preview.kind === 'image' && preview.url"
@@ -790,9 +986,12 @@ onBeforeUnmount(() => {
         class="max-h-full max-w-full object-contain"
         @contextmenu.prevent
         draggable="false"
-      >
+      />
 
-      <div v-else-if="preview.kind === 'video' && preview.url" class="flex h-full w-full max-w-5xl flex-col items-center justify-center gap-3">
+      <div
+        v-else-if="preview.kind === 'video' && preview.url"
+        class="flex h-full w-full max-w-5xl flex-col items-center justify-center gap-3"
+      >
         <video
           ref="videoRef"
           :src="preview.url"
@@ -806,8 +1005,14 @@ onBeforeUnmount(() => {
           @ended="videoPlaying = false"
           @contextmenu.prevent
         />
-        <div class="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-          <button type="button" class="rounded p-1.5 text-white hover:bg-white/10" @click="togglePlay">
+        <div
+          class="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2"
+        >
+          <button
+            type="button"
+            class="rounded p-1.5 text-white hover:bg-white/10"
+            @click="togglePlay"
+          >
             <Pause v-if="videoPlaying" class="h-5 w-5" />
             <Play v-else class="h-5 w-5" />
           </button>
@@ -820,15 +1025,28 @@ onBeforeUnmount(() => {
             :value="videoTime"
             class="h-1 flex-1 cursor-pointer accent-sky-400"
             @input="seekVideo"
+          />
+          <span class="w-12 text-right text-[11px] text-white/70">{{
+            fmtTime(videoDuration)
+          }}</span>
+          <button
+            v-if="canNext()"
+            type="button"
+            class="rounded p-1.5 text-white/80 hover:bg-white/10 hover:text-white"
+            title="Next"
+            @click="goNext"
           >
-          <span class="w-12 text-right text-[11px] text-white/70">{{ fmtTime(videoDuration) }}</span>
-          <button v-if="canNext()" type="button" class="rounded p-1.5 text-white/80 hover:bg-white/10 hover:text-white" title="Next" @click="goNext">
             <ChevronRight class="h-5 w-5" />
           </button>
         </div>
       </div>
 
-      <audio v-else-if="preview.kind === 'audio' && preview.url" :src="preview.url" controls class="w-full max-w-xl" />
+      <audio
+        v-else-if="preview.kind === 'audio' && preview.url"
+        :src="preview.url"
+        controls
+        class="w-full max-w-xl"
+      />
 
       <iframe
         v-else-if="preview.kind === 'pdf' && preview.url"
