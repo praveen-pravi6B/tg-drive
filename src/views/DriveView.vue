@@ -4,6 +4,8 @@ import { RouterLink } from 'vue-router'
 import {
   ChevronLeft,
   ChevronRight,
+  ClipboardPaste,
+  Copy,
   Download,
   Eye,
   File,
@@ -24,6 +26,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Scissors,
   Trash2,
   Upload,
   X,
@@ -60,6 +63,8 @@ const vaultPassphrase = ref('')
 const vaultConfirm = ref('')
 const vaultFormError = ref('')
 const vaultRevealing = ref(false)
+const selectedIds = ref(new Set())
+const clipboard = ref(null) // { mode: 'cut'|'copy', ids: string[], sourceTopicId: number }
 
 const videoRef = ref(null)
 const videoPlaying = ref(false)
@@ -81,6 +86,12 @@ const checking = computed(
 )
 
 const previewableInFolder = computed(() => drive.files.filter((f) => isPreviewable(f)))
+const selectedCount = computed(() => selectedIds.value.size)
+const hasSelection = computed(() => selectedIds.value.size > 0)
+const hasClipboard = computed(
+  () => Array.isArray(clipboard.value?.ids) && clipboard.value.ids.length > 0,
+)
+const clipboardCount = computed(() => clipboard.value?.ids?.length || 0)
 
 function isPreviewable(item) {
   if (!item) return false
@@ -194,7 +205,62 @@ async function openPreview(item) {
   }
 }
 
+function isSelected(id) {
+  return selectedIds.value.has(id)
+}
+function toggleSelection(id) {
+  const next = new Set(selectedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedIds.value = next
+}
+function clearSelection() {
+  if (selectedIds.value.size) selectedIds.value = new Set()
+}
+// reserved for future bulk actions
+// function selectAllCurrent() {
+//   selectedIds.value = new Set((drive.files || []).map((f) => f.id).filter(Boolean))
+// }
+function copySelection() {
+  const ids = [...selectedIds.value]
+  if (!ids.length) return
+  clipboard.value = { mode: 'copy', ids, sourceTopicId: drive.selectedTopicId }
+  actionError.value = ''
+}
+function cutSelection() {
+  const ids = [...selectedIds.value]
+  if (!ids.length) return
+  clipboard.value = { mode: 'cut', ids, sourceTopicId: drive.selectedTopicId }
+  actionError.value = ''
+}
+async function pasteClipboard() {
+  if (!hasClipboard.value || !drive.selectedTopicId) return
+  actionError.value = ''
+  const manifests = (clipboard.value.ids || [])
+    .map((id) => drive.allFiles.find((f) => f.id === id))
+    .filter(Boolean)
+  if (!manifests.length) {
+    clipboard.value = null
+    return
+  }
+  try {
+    await drive.pasteFiles({
+      mode: clipboard.value.mode,
+      manifests,
+      targetTopicId: drive.selectedTopicId,
+    })
+    if (clipboard.value?.mode === 'cut') clipboard.value = null
+    clearSelection()
+  } catch (error) {
+    actionError.value = drive.batchTask?.error || error.message
+  }
+}
+function clearClipboard() {
+  clipboard.value = null
+}
+
 function openItem(item) {
+  if (!item) return
   if (isPreviewable(item)) openPreview(item)
   else download(item)
 }
@@ -272,6 +338,11 @@ function ctxDelete(item) {
   removeFile(item)
   closeContextMenu()
 }
+function ctxToggleSelect(item) {
+  if (!item) return
+  toggleSelection(item.id)
+  closeContextMenu()
+}
 function onGlobalClick() {
   closeContextMenu()
   newMenuOpen.value = false
@@ -299,6 +370,7 @@ function onGlobalKey(e) {
 }
 
 function startRename(item) {
+  if (!item || selectedCount.value > 1) return
   renameTarget.value = item
   renameValue.value = item?.name || ''
   closeContextMenu()
@@ -467,6 +539,13 @@ watch(
     if (ready.value) scheduleThumbs()
   },
   { deep: true },
+)
+
+watch(
+  () => drive.selectedTopicId,
+  () => {
+    clearSelection()
+  },
 )
 
 onMounted(async () => {
@@ -639,6 +718,76 @@ onBeforeUnmount(() => {
       </div>
 
       <div
+        v-if="hasSelection || hasClipboard || drive.batchTask"
+        class="flex flex-wrap items-center gap-2 rounded-xl border border-sky-400/20 bg-sky-400/[0.05] p-2.5 text-xs"
+      >
+        <template v-if="hasSelection">
+          <span class="font-medium text-sky-200">{{ selectedCount }} selected</span>
+          <AppButton
+            size="sm"
+            variant="outline"
+            :disabled="drive.isBatchRunning"
+            @click="copySelection"
+          >
+            <Copy class="h-3.5 w-3.5" /> Copy
+          </AppButton>
+          <AppButton
+            size="sm"
+            variant="outline"
+            :disabled="drive.isBatchRunning"
+            @click="cutSelection"
+          >
+            <Scissors class="h-3.5 w-3.5" /> Cut
+          </AppButton>
+          <AppButton size="sm" variant="ghost" @click="clearSelection">Clear</AppButton>
+        </template>
+        <div v-if="hasClipboard" class="ml-auto flex items-center gap-2">
+          <span class="text-muted-foreground">
+            {{ clipboard.mode === 'cut' ? 'Cut' : 'Copied' }} {{ clipboardCount }} item(s)
+          </span>
+          <AppButton
+            size="sm"
+            :disabled="!drive.selectedTopicId || drive.isBatchRunning || drive.isUploading"
+            @click="pasteClipboard"
+          >
+            <ClipboardPaste class="h-3.5 w-3.5" /> Paste here
+          </AppButton>
+          <AppButton
+            size="sm"
+            variant="ghost"
+            :disabled="drive.isBatchRunning"
+            @click="clearClipboard"
+          >
+            Cancel
+          </AppButton>
+        </div>
+        <div v-if="drive.batchTask" class="flex w-full items-center gap-2 text-muted-foreground">
+          <LoaderCircle
+            v-if="drive.batchTask.running"
+            class="h-3.5 w-3.5 animate-spin text-sky-300"
+          />
+          <span>
+            {{
+              drive.batchTask.running
+                ? `${drive.batchTask.mode === 'cut' ? 'Moving' : 'Copying'} ${drive.batchTask.done}/${drive.batchTask.total}: ${drive.batchTask.current || ''}`
+                : drive.batchTask.error
+                  ? `Paste failed: ${drive.batchTask.error}`
+                  : `${drive.batchTask.mode === 'cut' ? 'Moved' : 'Copied'} ${drive.batchTask.done}/${drive.batchTask.total}`
+            }}
+          </span>
+          <AppButton
+            v-if="!drive.batchTask.running"
+            size="sm"
+            variant="ghost"
+            class="ml-auto"
+            @click="drive.clearBatchTask()"
+          >
+            Dismiss
+          </AppButton>
+        </div>
+      </div>
+
+      <div
         v-if="showNewFolder"
         class="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.02] p-3"
       >
@@ -746,9 +895,21 @@ onBeforeUnmount(() => {
             <div
               v-for="item in drive.files"
               :key="item.id"
-              class="group relative overflow-hidden rounded-xl border border-white/5 bg-white/[0.02] transition-colors hover:bg-white/[0.05]"
+              class="group relative overflow-hidden rounded-xl border bg-white/[0.02] transition-colors hover:bg-white/[0.05]"
+              :class="
+                isSelected(item.id) ? 'border-sky-400/40 ring-1 ring-sky-400/30' : 'border-white/5'
+              "
               @contextmenu="openContextMenu($event, item)"
             >
+              <div class="absolute left-1.5 top-1.5 z-10">
+                <input
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-white/20 bg-black/50 accent-sky-500"
+                  :checked="isSelected(item.id)"
+                  @click.stop
+                  @change="toggleSelection(item.id)"
+                />
+              </div>
               <button
                 type="button"
                 class="block aspect-[4/3] w-full overflow-hidden bg-black/20"
@@ -811,8 +972,16 @@ onBeforeUnmount(() => {
               v-for="item in drive.files"
               :key="item.id"
               class="flex items-center gap-3 px-3 py-2.5 hover:bg-white/[0.03]"
+              :class="isSelected(item.id) ? 'bg-sky-400/[0.06]' : ''"
               @contextmenu="openContextMenu($event, item)"
             >
+              <input
+                type="checkbox"
+                class="h-4 w-4 shrink-0 rounded border-white/20 bg-black/40 accent-sky-500"
+                :checked="isSelected(item.id)"
+                @click.stop
+                @change="toggleSelection(item.id)"
+              />
               <button
                 type="button"
                 class="shrink-0 overflow-hidden rounded-lg"
@@ -938,7 +1107,7 @@ onBeforeUnmount(() => {
   <!-- Context menu -->
   <div
     v-if="contextMenu"
-    class="fixed z-[60] w-44 overflow-hidden rounded-xl border border-white/10 bg-background/95 py-1 shadow-xl backdrop-blur"
+    class="fixed z-[60] w-48 overflow-hidden rounded-xl border border-white/10 bg-background/95 py-1 shadow-xl backdrop-blur"
     :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
     @click.stop
     @contextmenu.prevent
@@ -950,10 +1119,17 @@ onBeforeUnmount(() => {
       <Eye class="h-4 w-4" /> Open
     </button>
     <button
-      class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+      class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+      :disabled="selectedCount > 1"
       @click="startRename(contextMenu.item)"
     >
       <Pencil class="h-4 w-4" /> Rename
+    </button>
+    <button
+      class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+      @click="ctxToggleSelect(contextMenu.item)"
+    >
+      <Copy class="h-4 w-4" /> {{ isSelected(contextMenu.item.id) ? 'Unselect' : 'Select' }}
     </button>
     <button
       class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"

@@ -61,6 +61,7 @@ export const useDriveStore = defineStore('drive', {
     indexLoaded: false,
     indexMessageId: 0,
     uploadTask: null, // { fileName, fileId, progress, stage, error, done, chunksDone, chunkCount, running }
+    batchTask: null, // { mode, total, done, current, running, error }
   }),
 
   getters: {
@@ -68,6 +69,7 @@ export const useDriveStore = defineStore('drive', {
       return state.folders.find((folder) => folder.id === state.selectedTopicId) || null
     },
     isUploading: (state) => Boolean(state.uploadTask?.running),
+    isBatchRunning: (state) => Boolean(state.batchTask?.running),
   },
 
   actions: {
@@ -286,13 +288,14 @@ export const useDriveStore = defineStore('drive', {
       }
     },
 
-    async upload(file) {
+    async upload(file, topicId = this.selectedTopicId) {
       if (!file) throw new Error('Choose a file')
       if (file.size > limits.maxFileSize) {
         throw new Error(`Max file size is ${Math.round(limits.maxFileSize / (1024 * 1024))} MB`)
       }
       if (this.isUploading) throw new Error('An upload is already running')
-      if (!this.selectedTopicId) throw new Error('Create or select a folder first')
+      const targetTopicId = Number(topicId)
+      if (!targetTopicId) throw new Error('Create or select a folder first')
 
       const { client, channel, masterKey } = this.requireReady()
       uploadAbort = new AbortController()
@@ -312,7 +315,7 @@ export const useDriveStore = defineStore('drive', {
         const manifest = await uploadFile({
           client,
           channel,
-          topicId: this.selectedTopicId,
+          topicId: targetTopicId,
           file,
           masterKey,
           chunkSize: limits.chunkSize,
@@ -440,6 +443,46 @@ export const useDriveStore = defineStore('drive', {
         log('error', 'drive', 'Could not delete folder topic on Telegram', error)
         throw error
       }
+    },
+
+    async pasteFiles({ mode, manifests, targetTopicId }) {
+      const target = Number(targetTopicId)
+      if (!target) throw new Error('Select a destination folder')
+      const items = (manifests || []).filter(Boolean)
+      if (!items.length) return
+      if (this.isUploading || this.isBatchRunning) throw new Error('Another operation is running')
+
+      this.batchTask = { mode, total: items.length, done: 0, current: '', running: true, error: '' }
+      try {
+        for (const manifest of items) {
+          if (mode === 'cut' && Number(manifest.folderTopicId) === target) {
+            this.batchTask.done += 1
+            continue
+          }
+          this.batchTask.current = manifest.name || 'file'
+          const blob = await this.fetchBlob(manifest)
+          const file = new File([blob], manifest.name || 'file', {
+            type: manifest.mime || blob.type || 'application/octet-stream',
+          })
+          // Sequential re-upload into destination folder (new file id/manifest).
+          await this.upload(file, target)
+          if (mode === 'cut') {
+            await this.remove(manifest)
+          }
+          this.batchTask.done += 1
+        }
+      } catch (error) {
+        this.batchTask.error = errorMessage(error)
+        log('error', 'drive', 'Paste operation failed', error)
+        throw error
+      } finally {
+        if (this.batchTask) this.batchTask.running = false
+      }
+    },
+
+    clearBatchTask() {
+      if (this.batchTask?.running) return
+      this.batchTask = null
     },
   },
 })
