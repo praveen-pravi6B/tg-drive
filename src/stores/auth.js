@@ -8,7 +8,6 @@ import { clearSession, loadSession, saveSession } from '@/lib/telegram/session'
 import { toBase64Url } from '@/lib/crypto/bytes'
 
 let tg = null
-let connected = false
 let initPromise = null
 const pendingSteps = new Map()
 
@@ -62,7 +61,6 @@ function createClient(sessionString = '') {
 function disposeClient({ logOut = false } = {}) {
   const instance = tg
   tg = null
-  connected = false
   if (!instance) return Promise.resolve()
   const done = logOut
     ? instance.logOut().catch((error) => log('warn', 'auth', 'logOut failed', error))
@@ -78,10 +76,9 @@ function disposeClient({ logOut = false } = {}) {
 
 async function ensureConnected() {
   if (!tg) throw new Error('Telegram client is not ready')
-  if (connected) return tg
+  if (tg.connected) return tg
   const ok = await tg.connect()
   if (!ok) throw new Error('Could not reach Telegram. Check your connection and try again.')
-  connected = true
   return tg
 }
 
@@ -137,7 +134,6 @@ export const useAuthStore = defineStore('auth', {
         const saved = loadSession()
         try {
           tg = createClient(saved)
-          connected = false
 
           // No stored session: do not touch the network yet. The login view
           // renders immediately and starts QR/phone auth when the user is ready.
