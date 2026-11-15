@@ -28,6 +28,7 @@ import {
   Upload,
   X,
 } from '@lucide/vue'
+import { useAuthStore } from '@/stores/auth'
 import { useDriveStore } from '@/stores/drive'
 import { useVaultStore } from '@/stores/vault'
 import { MIN_PASSPHRASE_LENGTH } from '@/lib/vault/vault'
@@ -37,6 +38,7 @@ import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 
+const auth = useAuthStore()
 const drive = useDriveStore()
 const vault = useVaultStore()
 
@@ -64,9 +66,19 @@ const videoPlaying = ref(false)
 const videoTime = ref(0)
 const videoDuration = ref(0)
 
-const ready = computed(() => vault.status === 'unlocked')
-const needsVault = computed(() => ['no-vault', 'locked'].includes(vault.status))
-const checking = computed(() => ['idle', 'checking'].includes(vault.status))
+const restoringSession = computed(
+  () =>
+    !auth.isAuthorized &&
+    (auth.status === 'connecting' || (auth.status === 'idle' && auth.hasStoredSession)),
+)
+const ready = computed(() => auth.isAuthorized && vault.status === 'unlocked')
+const needsVault = computed(
+  () => auth.isAuthorized && ['no-vault', 'locked'].includes(vault.status),
+)
+const checking = computed(
+  () =>
+    restoringSession.value || (auth.isAuthorized && ['idle', 'checking'].includes(vault.status)),
+)
 
 const previewableInFolder = computed(() => drive.files.filter((f) => isPreviewable(f)))
 
@@ -422,8 +434,23 @@ async function removeFile(manifest) {
 }
 
 watch(
+  () => auth.isAuthorized,
+  async (authorized) => {
+    if (authorized) {
+      await vault.init()
+      if (vault.status === 'unlocked') await drive.init()
+    } else {
+      drive.reset()
+      vault.reset()
+      revokeThumbs()
+    }
+  },
+)
+
+watch(
   () => vault.status,
   async (status, previous) => {
+    if (!auth.isAuthorized) return
     if (status === 'unlocked' && previous !== 'unlocked') {
       vaultFormError.value = ''
       await drive.init()
@@ -445,8 +472,10 @@ watch(
 onMounted(async () => {
   window.addEventListener('click', onGlobalClick)
   window.addEventListener('keydown', onGlobalKey)
-  await vault.init()
-  if (vault.status === 'unlocked') await drive.init()
+  if (auth.isAuthorized) {
+    await vault.init()
+    if (vault.status === 'unlocked') await drive.init()
+  }
 })
 onBeforeUnmount(() => {
   window.removeEventListener('click', onGlobalClick)
@@ -629,10 +658,20 @@ onBeforeUnmount(() => {
         <span v-if="folderError" class="text-xs text-red-300">{{ folderError }}</span>
       </div>
 
-      <AppCard v-if="checking" title="Loading drive" description="Resolving the vault and group">
+      <AppCard
+        v-if="checking"
+        :title="restoringSession ? 'Restoring session' : 'Loading drive'"
+        :description="
+          restoringSession
+            ? 'Reconnecting to Telegram in the background'
+            : 'Resolving the vault and group'
+        "
+      >
         <div class="flex items-center gap-3 py-4 text-sm text-muted-foreground">
           <LoaderCircle class="h-4 w-4 animate-spin text-sky-300" />
-          Checking your Telegram drive…
+          {{
+            restoringSession ? 'Restoring your Telegram session…' : 'Checking your Telegram drive…'
+          }}
         </div>
       </AppCard>
 

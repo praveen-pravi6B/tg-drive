@@ -1,11 +1,12 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { useOnline } from '@vueuse/core'
 import { Cloud, HardDrive, KeyRound, Lock, LogOut, Terminal, User, WifiOff } from '@lucide/vue'
 import { useAuthStore } from '@/stores/auth'
 import { useDriveStore } from '@/stores/drive'
 import { useVaultStore } from '@/stores/vault'
+import { hasStoredSession } from '@/lib/telegram/session'
 import AppButton from '@/components/ui/AppButton.vue'
 
 const auth = useAuthStore()
@@ -48,6 +49,27 @@ onMounted(() => {
   if (auth.status === 'idle') auth.init()
   window.addEventListener('click', closeProfile)
 })
+
+watch(
+  () => [auth.status, auth.isAuthorized, route.meta.public, route.fullPath],
+  () => {
+    if (auth.isAuthorized && route.name === 'login') {
+      const next = typeof route.query.next === 'string' ? route.query.next : '/drive'
+      router.replace(next.startsWith('/') ? next : '/drive')
+      return
+    }
+    if (route.meta.public || auth.isAuthorized) return
+
+    // Background restore finished without an authorized session -> go to login
+    // (LoginView shows retry UI when a saved session is still present).
+    if (!['idle', 'connecting'].includes(auth.status)) {
+      router.replace({
+        name: 'login',
+        query: route.fullPath === '/drive' ? {} : { next: route.fullPath },
+      })
+    }
+  },
+)
 
 onBeforeUnmount(() => {
   window.removeEventListener('click', closeProfile)
@@ -114,7 +136,12 @@ onBeforeUnmount(() => {
               <span
                 class="grid h-7 w-7 overflow-hidden place-items-center rounded-full bg-accent text-[11px] font-semibold text-accent-foreground"
               >
-                <img v-if="auth.photoUrl" :src="auth.photoUrl" alt="" class="h-full w-full object-cover" >
+                <img
+                  v-if="auth.photoUrl"
+                  :src="auth.photoUrl"
+                  alt=""
+                  class="h-full w-full object-cover"
+                />
                 <template v-else>{{ initials || 'TG' }}</template>
               </span>
               <div class="hidden leading-tight text-left sm:block">
@@ -133,11 +160,18 @@ onBeforeUnmount(() => {
                 <span
                   class="grid h-10 w-10 overflow-hidden place-items-center rounded-full bg-accent text-sm font-semibold text-accent-foreground"
                 >
-                  <img v-if="auth.photoUrl" :src="auth.photoUrl" alt="" class="h-full w-full object-cover" >
+                  <img
+                    v-if="auth.photoUrl"
+                    :src="auth.photoUrl"
+                    alt=""
+                    class="h-full w-full object-cover"
+                  />
                   <template v-else>{{ initials || 'TG' }}</template>
                 </span>
                 <div class="min-w-0">
-                  <div class="truncate text-sm font-medium">{{ auth.displayName || 'Telegram user' }}</div>
+                  <div class="truncate text-sm font-medium">
+                    {{ auth.displayName || 'Telegram user' }}
+                  </div>
                   <div class="truncate text-xs text-muted-foreground">
                     {{ auth.me?.username ? `@${auth.me.username}` : auth.me?.id || '—' }}
                   </div>
@@ -147,7 +181,13 @@ onBeforeUnmount(() => {
                 <div class="flex items-center justify-between text-muted-foreground">
                   <span>Vault</span>
                   <span :class="vault.isUnlocked ? 'text-emerald-300' : 'text-amber-300'">
-                    {{ vault.isUnlocked ? 'Unlocked' : vault.status === 'no-vault' ? 'Not set up' : 'Locked' }}
+                    {{
+                      vault.isUnlocked
+                        ? 'Unlocked'
+                        : vault.status === 'no-vault'
+                          ? 'Not set up'
+                          : 'Locked'
+                    }}
                   </span>
                 </div>
               </div>

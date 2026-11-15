@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { hasStoredSession } from '@/lib/telegram/session'
 
 const routes = [
   { path: '/', redirect: '/drive' },
@@ -40,9 +41,17 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
+  const hadSession = hasStoredSession()
 
   if (!auth.status || auth.status === 'idle') {
-    await auth.init()
+    const initPromise = auth.init()
+    // If a session is stored, don't flash the login page on refresh while
+    // restore runs in the background. Protected views handle the loading state.
+    if (hadSession) {
+      initPromise.catch(() => {})
+    } else {
+      await initPromise
+    }
   }
 
   if (to.meta.public) {
@@ -51,6 +60,8 @@ router.beforeEach(async (to) => {
   }
 
   if (!auth.isAuthorized) {
+    // Allow background restore/retry when a session is still present.
+    if (hasStoredSession()) return true
     return { name: 'login', query: to.fullPath === '/drive' ? {} : { next: to.fullPath } }
   }
 
