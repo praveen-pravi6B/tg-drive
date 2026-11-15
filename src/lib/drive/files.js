@@ -4,6 +4,7 @@ import { randomId } from '@/lib/crypto/bytes'
 import { deriveFileKeyBytes } from '@/lib/crypto/kdf'
 import { encryptChunk, decryptChunk } from '@/lib/crypto/chunk'
 import { log } from '@/lib/logger'
+import { sleep } from '@/lib/utils'
 import {
   deleteMessages,
   downloadMessageBytes,
@@ -12,7 +13,6 @@ import {
   sendDocumentToTopic,
 } from '@/lib/telegram/topics'
 import {
-  MANIFEST_CAPTION_PREFIX,
   MANIFEST_VERSION,
   fileCategory,
   manifestCaption,
@@ -73,30 +73,51 @@ export async function uploadFile({
       encryptedSize: data.length,
     })
 
-    let last = 0
-    const message = await sendDocumentToTopic({
-      client,
-      channel,
-      topicId,
-      name: `${fileId}-${String(index).padStart(4, '0')}.bin`,
-      data,
-      caption: `d1:${fileId}:${index + 1}/${count}`,
-      onProgress: (progress) => {
-        if (progress - last >= 0.1 || progress === 1) {
-          last = progress
-          onProgress({ type: 'chunk-upload-progress', index, progress })
-        }
-      },
-    })
+    let uploaded = null
+    let attempt = 0
+    const maxAttempts = 4
+    while (!uploaded) {
+      try {
+        let last = 0
+        const message = await sendDocumentToTopic({
+          client,
+          channel,
+          topicId,
+          name: `${fileId}-${String(index).padStart(4, '0')}.bin`,
+          data,
+          caption: `d1:${fileId}:${index + 1}/${count}`,
+          onProgress: (progress) => {
+            if (progress - last >= 0.1 || progress === 1) {
+              last = progress
+              onProgress({ type: 'chunk-upload-progress', index, progress })
+            }
+          },
+        })
+        uploaded = message
+      } catch (error) {
+        if (signal?.aborted) throw error
+        attempt += 1
+        if (attempt >= maxAttempts) throw error
+        const delay = Math.min(2000 * 2 ** (attempt - 1), 15000)
+        log(
+          'warn',
+          'drive',
+          `Chunk ${index + 1}/${count} upload failed, retrying (${attempt}/${maxAttempts - 1})`,
+          error,
+        )
+        onProgress({ type: 'chunk-retry', index, attempt, delay })
+        await sleep(delay)
+      }
+    }
 
     chunks.push({
       index,
-      messageId: message.id,
+      messageId: uploaded.id,
       plainSize: plain.length,
       encryptedSize: data.length,
       sha256,
     })
-    onProgress({ type: 'chunk-uploaded', index, messageId: message.id })
+    onProgress({ type: 'chunk-uploaded', index, messageId: uploaded.id })
   }
 
   const manifest = {

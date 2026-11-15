@@ -4,6 +4,7 @@ import bigInt from 'big-integer'
 import { Buffer } from 'buffer'
 import { appInfo } from '@/lib/config'
 import { log } from '@/lib/logger'
+import { withFloodRetry } from './retry'
 
 export function randomBigInt() {
   const bytes = crypto.getRandomValues(new Uint8Array(8))
@@ -239,48 +240,68 @@ export async function sendDocumentToTopic({
   // 20 MB - 1 byte; anything larger makes GramJS ignore the in-memory buffer
   // and try to read `file.path` (empty in a browser), which fails instantly.
   // Passing the exact size keeps the buffer path for every chunk.
-  const uploaded = await client.uploadFile({
-    file,
-    workers: 1,
-    onProgress,
-    maxBufferSize: Math.max(bytes.length, 1),
-  })
+  const uploaded = await withFloodRetry(
+    () =>
+      client.uploadFile({
+        file,
+        workers: 1,
+        onProgress,
+        maxBufferSize: Math.max(bytes.length, 1),
+      }),
+    { label: 'upload file' },
+  )
 
-  return client.sendFile(toInputChannel(channel), {
-    file: uploaded,
-    caption,
-    forceDocument: true,
-    // GramJS only builds the `reply_to` object when `replyTo` is set, and it
-    // drops `topMsgId` otherwise. Telegram expects the topic id in
-    // `reply_to_msg_id` for messages posted inside a forum topic.
-    replyTo: topicId,
-    topMsgId: topicId,
-  })
+  return withFloodRetry(
+    () =>
+      client.sendFile(toInputChannel(channel), {
+        file: uploaded,
+        caption,
+        forceDocument: true,
+        // GramJS only builds the `reply_to` object when `replyTo` is set, and it
+        // drops `topMsgId` otherwise. Telegram expects the topic id in
+        // `reply_to_msg_id` for messages posted inside a forum topic.
+        replyTo: topicId,
+        topMsgId: topicId,
+      }),
+    { label: 'send file' },
+  )
 }
 
 export async function readTopic(client, channel, topicId, { limit = 20, offsetId = 0 } = {}) {
-  const messages = await client.getMessages(toInputChannel(channel), {
-    replyTo: topicId,
-    limit,
-    offsetId,
-    addOffset: 0,
-  })
+  const messages = await withFloodRetry(
+    () =>
+      client.getMessages(toInputChannel(channel), {
+        replyTo: topicId,
+        limit,
+        offsetId,
+        addOffset: 0,
+      }),
+    { label: 'read topic' },
+  )
   return messages.filter(Boolean)
 }
 
 export async function readMessages(client, channel, ids) {
-  return client.getMessages(toInputChannel(channel), { ids })
+  return withFloodRetry(() => client.getMessages(toInputChannel(channel), { ids }), {
+    label: 'read messages',
+  })
 }
 
 export async function downloadMessageBytes(client, message, onProgress) {
-  const buffer = await client.downloadMedia(message, { progressCallback: onProgress })
+  const buffer = await withFloodRetry(
+    () => client.downloadMedia(message, { progressCallback: onProgress }),
+    { label: 'download media' },
+  )
   if (!buffer) throw new Error('Telegram returned an empty file')
   return new Uint8Array(buffer)
 }
 
 export async function deleteMessages(client, channel, ids) {
   if (!ids?.length) return
-  await client.deleteMessages(toInputChannel(channel), ids, { revoke: true })
+  await withFloodRetry(
+    () => client.deleteMessages(toInputChannel(channel), ids, { revoke: true }),
+    { label: 'delete messages' },
+  )
 }
 
 export async function pinMessage(client, channel, messageId) {
