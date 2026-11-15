@@ -1,5 +1,12 @@
 import { aesGcmDecrypt, aesGcmEncrypt, deriveFileKeyBytes } from '@/lib/crypto/kdf'
-import { fromBase64, toBase64, utf8 } from '@/lib/crypto/bytes'
+import { fromBase64, toArrayBuffer, toBase64, utf8 } from '@/lib/crypto/bytes'
+
+async function importAesKey(raw) {
+  return crypto.subtle.importKey('raw', toArrayBuffer(raw), { name: 'AES-GCM' }, false, [
+    'encrypt',
+    'decrypt',
+  ])
+}
 
 export const MANIFEST_VERSION = 1
 export const MANIFEST_CAPTION_PREFIX = 'tgm1:'
@@ -34,16 +41,18 @@ export function fileCategory(mime = '', name = '') {
 export async function sealManifest({ masterKey, manifest }) {
   if (!masterKey) throw new Error('Vault is locked')
   if (!manifest?.id) throw new Error('Manifest id is required')
-  const key = await deriveFileKeyBytes(masterKey, manifest.id)
+  const rawKey = await deriveFileKeyBytes(masterKey, manifest.id)
+  const key = await importAesKey(rawKey)
   const plain = utf8(JSON.stringify(manifest))
   const encrypted = await aesGcmEncrypt(key, plain, manifestAad(manifest.id))
-  return { encrypted, fileKey: key }
+  return { encrypted, fileKey: rawKey }
 }
 
 export async function openManifest({ masterKey, fileId, blob }) {
   if (!masterKey) throw new Error('Vault is locked')
   if (!fileId) throw new Error('File id is required')
-  const key = await deriveFileKeyBytes(masterKey, fileId)
+  const rawKey = await deriveFileKeyBytes(masterKey, fileId)
+  const key = await importAesKey(rawKey)
   let plain
   try {
     plain = await aesGcmDecrypt(key, blob, manifestAad(fileId))
@@ -54,7 +63,7 @@ export async function openManifest({ masterKey, fileId, blob }) {
   if (manifest?.v !== MANIFEST_VERSION || manifest.id !== fileId) {
     throw new Error('File metadata is invalid')
   }
-  return { manifest, fileKey: key }
+  return { manifest, fileKey: rawKey }
 }
 
 // Helpers for any future JSON-safe binary fields.

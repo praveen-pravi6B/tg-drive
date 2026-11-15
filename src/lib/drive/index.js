@@ -1,5 +1,12 @@
 import { aesGcmDecrypt, aesGcmEncrypt, deriveNamedKeyBytes } from '@/lib/crypto/kdf'
-import { utf8 } from '@/lib/crypto/bytes'
+import { toArrayBuffer, utf8 } from '@/lib/crypto/bytes'
+
+async function importAesKey(raw) {
+  return crypto.subtle.importKey('raw', toArrayBuffer(raw), { name: 'AES-GCM' }, false, [
+    'encrypt',
+    'decrypt',
+  ])
+}
 
 export const INDEX_VERSION = 1
 export const INDEX_FILE_NAME = 'i.bin'
@@ -15,7 +22,8 @@ export function emptySnapshot(driveId = '') {
 
 export async function sealSnapshot({ masterKey, driveId, snapshot }) {
   if (!masterKey) throw new Error('Vault is locked')
-  const key = await deriveNamedKeyBytes(masterKey, 'index-v1')
+  const rawKey = await deriveNamedKeyBytes(masterKey, 'index-v1')
+  const key = await importAesKey(rawKey)
   const payload = {
     ...emptySnapshot(driveId),
     ...snapshot,
@@ -29,7 +37,8 @@ export async function sealSnapshot({ masterKey, driveId, snapshot }) {
 
 export async function openSnapshot({ masterKey, driveId, blob }) {
   if (!masterKey) throw new Error('Vault is locked')
-  const key = await deriveNamedKeyBytes(masterKey, 'index-v1')
+  const rawKey = await deriveNamedKeyBytes(masterKey, 'index-v1')
+  const key = await importAesKey(rawKey)
   let plain
   try {
     plain = await aesGcmDecrypt(key, blob, indexAad(driveId))
