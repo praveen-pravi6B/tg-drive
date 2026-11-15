@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { useAuthStore } from './auth'
 import { useVaultStore, getMasterKey } from './vault'
 import { errorMessage, log } from '@/lib/logger'
+import { readIndexBlob, writeIndexBlob } from '@/lib/telegram/drive'
 import { createTopic, listTopics } from '@/lib/telegram/topics'
 import {
   deleteFile,
@@ -10,9 +11,16 @@ import {
   listFilesInTopic,
   uploadFile,
 } from '@/lib/drive/files'
+import { openSnapshot, sealSnapshot } from '@/lib/drive/index'
 import { limits } from '@/lib/config'
 
 let uploadAbort = null
+let saveChain = Promise.resolve()
+
+function queueSave(task) {
+  saveChain = saveChain.then(task, task)
+  return saveChain
+}
 
 export const useDriveStore = defineStore('drive', {
   state: () => ({
@@ -20,10 +28,13 @@ export const useDriveStore = defineStore('drive', {
     error: '',
     folders: [],
     selectedTopicId: 0,
+    allFiles: [],
     files: [],
     filesLoading: false,
     creatingFolder: false,
-    upload: null, // { fileName, fileId, progress, stage, error, done }
+    indexLoaded: false,
+    indexMessageId: 0,
+    upload: null, // { fileName, fileId, progress, stage, error, done, chunksDone, chunkCount }
   }),
 
   getters: {
@@ -37,6 +48,7 @@ export const useDriveStore = defineStore('drive', {
     reset() {
       if (uploadAbort) uploadAbort.abort()
       uploadAbort = null
+      saveChain = Promise.resolve()
       this.$reset()
     },
 
@@ -64,28 +76,116 @@ export const useDriveStore = defineStore('drive', {
       if (!auth.isAuthorized || !client) throw new Error('Sign in to continue')
       if (vault.status !== 'unlocked' || !masterKey) throw new Error('Unlock the vault to continue')
       if (!vault.group?.id) throw new Error('The drive group is not ready yet')
-      return { client, channel: vault.group, masterKey }
+      return { client, channel: vault.group, masterKey, vault }
     },
 
-    async refreshFolders() {
+    syncSelectedFiles() {
+      if (!this.selectedTopicId) {
+        this.files = []
+        return
+      }
+      this.files = this.allFiles
+        .filter((file) => Number(file.folderTopicId) === Number(this.selectedTopicId))
+        .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+    },
+
+    applySnapshot(snapshot) {
+      const folders = Array.isArray(snapshot?.folders) ? snapshot.folders : []
+      const files = Array.isArray(snapshot?.files) ? snapshot.files : []
+      this.folders = folders
+        .filter((folder) => folder?.id && !isReservedTopicTitle(folder.title))
+        .map((folder) => ({ id: Number(folder.id), title: folder.title || 'Untitled folder' }))
+        .sort((a, b) => a.title.localeCompare(b.title))
+      this.allFiles = files.filter((file) => file?.id)
+      this.indexLoaded = true
+
+      if (this.selectedTopicId && !this.folders.some((f) => f.id === this.selectedTopicId)) {
+        this.selectedTopicId = 0
+      }
+      if (!this.selectedTopicId && this.folders[0]) {
+        this.selectedTopicId = this.folders[0].id
+      }
+      this.syncSelectedFiles()
+    },
+
+    async loadIndex() {
+      const { client, channel, masterKey, vault } = this.requireReady()
+      if (!vault.indexTopicId) return null
+      try {
+        const stored = await readIndexBlob(client, channel, vault.indexTopicId)
+        if (!stored) return null
+        const snapshot = await openSnapshot({
+          masterKey,
+          driveId: vault.driveId,
+          blob: stored.bytes,
+        })
+        this.indexMessageId = stored.messageId
+        this.applySnapshot(snapshot)
+        log('info', 'drive', 'Loaded encrypted drive index', {
+          files: this.allFiles.length,
+          folders: this.folders.length,
+        })
+        return snapshot
+      } catch (error) {
+        log('warn', 'drive', 'Could not load drive index; falling back to live scan', error)
+        return null
+      }
+    },
+
+    async saveIndex() {
+      const { client, channel, masterKey, vault } = this.requireReady()
+      if (!vault.indexTopicId) return
+      return queueSave(async () => {
+        try {
+          const { encrypted } = await sealSnapshot({
+            masterKey,
+            driveId: vault.driveId,
+            snapshot: {
+              folders: this.folders,
+              files: this.allFiles,
+            },
+          })
+          const message = await writeIndexBlob(client, channel, vault.indexTopicId, encrypted)
+          this.indexMessageId = message.id
+          log('info', 'drive', 'Saved encrypted drive index', {
+            files: this.allFiles.length,
+            folders: this.folders.length,
+          })
+        } catch (error) {
+          log('warn', 'drive', 'Could not save drive index', error)
+        }
+      })
+    },
+
+    async refreshFolders({ scanCurrent = true } = {}) {
       const { client, channel } = this.requireReady()
       this.status = this.status === 'idle' ? 'loading' : this.status
       this.error = ''
       try {
-        const topics = await listTopics(client, channel, { limit: 100 })
-        this.folders = topics
-          .filter((topic) => topic.id && !isReservedTopicTitle(topic.title))
-          .map((topic) => ({ id: topic.id, title: topic.title || 'Untitled folder' }))
-          .sort((a, b) => a.title.localeCompare(b.title))
+        // Prefer the encrypted snapshot; it contains folders and file metadata.
+        const snapshot = await this.loadIndex()
+        if (!snapshot) {
+          const topics = await listTopics(client, channel, { limit: 100 })
+          this.folders = topics
+            .filter((topic) => topic.id && !isReservedTopicTitle(topic.title))
+            .map((topic) => ({ id: topic.id, title: topic.title || 'Untitled folder' }))
+            .sort((a, b) => a.title.localeCompare(b.title))
 
-        if (this.selectedTopicId && !this.folders.some((f) => f.id === this.selectedTopicId)) {
-          this.selectedTopicId = 0
-          this.files = []
+          if (this.selectedTopicId && !this.folders.some((f) => f.id === this.selectedTopicId)) {
+            this.selectedTopicId = 0
+            this.files = []
+          }
+          if (!this.selectedTopicId && this.folders[0]) {
+            this.selectedTopicId = this.folders[0].id
+          }
+          // Build the index progressively from the selected folder if needed.
+          if (scanCurrent && this.selectedTopicId) await this.refreshFiles({ persist: true })
+        } else if (scanCurrent && this.selectedTopicId && !this.files.length) {
+          // Snapshot knew the folder but had no entries yet for this selection view.
+          this.syncSelectedFiles()
+          if (!this.files.length) await this.refreshFiles({ persist: false })
         }
-        if (!this.selectedTopicId && this.folders[0]) {
-          this.selectedTopicId = this.folders[0].id
-        }
-        if (this.selectedTopicId) await this.refreshFiles()
+
         this.status = 'ready'
       } catch (error) {
         this.status = 'error'
@@ -105,7 +205,8 @@ export const useDriveStore = defineStore('drive', {
           this.folders.push({ id: topic.id, title: topic.title || title })
           this.folders.sort((a, b) => a.title.localeCompare(b.title))
           this.selectedTopicId = topic.id
-          this.files = []
+          this.syncSelectedFiles()
+          await this.saveIndex()
         }
         log('info', 'drive', `Created folder "${title}"`)
         return topic
@@ -119,24 +220,34 @@ export const useDriveStore = defineStore('drive', {
 
     async selectFolder(topicId) {
       this.selectedTopicId = Number(topicId) || 0
-      this.files = []
-      if (this.selectedTopicId) await this.refreshFiles()
+      this.syncSelectedFiles()
+      if (this.selectedTopicId && !this.files.length) {
+        await this.refreshFiles({ persist: this.indexLoaded })
+      }
     },
 
-    async refreshFiles() {
+    mergeFilesForTopic(topicId, manifests) {
+      const others = this.allFiles.filter((file) => Number(file.folderTopicId) !== Number(topicId))
+      this.allFiles = [...others, ...manifests]
+      this.syncSelectedFiles()
+    },
+
+    async refreshFiles({ persist = false } = {}) {
       if (!this.selectedTopicId) return
       const vault = useVaultStore()
       if (vault.status !== 'unlocked') return
       const { client, channel, masterKey } = this.requireReady()
       this.filesLoading = true
       try {
-        this.files = await listFilesInTopic({
+        const manifests = await listFilesInTopic({
           client,
           channel,
           topicId: this.selectedTopicId,
           masterKey,
           limit: 200,
         })
+        this.mergeFilesForTopic(this.selectedTopicId, manifests)
+        if (persist || this.indexLoaded) await this.saveIndex()
       } catch (error) {
         log('error', 'drive', 'Could not load files', error)
         this.error = errorMessage(error)
@@ -195,7 +306,9 @@ export const useDriveStore = defineStore('drive', {
             }
           },
         })
-        this.files = [manifest, ...this.files]
+        this.allFiles = [manifest, ...this.allFiles.filter((item) => item.id !== manifest.id)]
+        this.syncSelectedFiles()
+        await this.saveIndex()
         return manifest
       } catch (error) {
         if (this.upload) {
@@ -235,7 +348,9 @@ export const useDriveStore = defineStore('drive', {
     async remove(manifest) {
       const { client, channel } = this.requireReady()
       await deleteFile({ client, channel, manifest })
-      this.files = this.files.filter((file) => file.id !== manifest.id)
+      this.allFiles = this.allFiles.filter((file) => file.id !== manifest.id)
+      this.syncSelectedFiles()
+      await this.saveIndex()
     },
   },
 })

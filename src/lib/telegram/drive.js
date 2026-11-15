@@ -1,6 +1,7 @@
 import { appInfo, storageKeys } from '@/lib/config'
 import { randomId } from '@/lib/crypto/bytes'
 import { log } from '@/lib/logger'
+import { INDEX_CAPTION, INDEX_FILE_NAME } from '@/lib/drive/index'
 import { VAULT_CAPTION, VAULT_FILE_NAME, VAULT_TOPIC_TITLE } from '@/lib/vault/format'
 import {
   createDriveGroup,
@@ -186,6 +187,47 @@ export async function writeVaultBlob(client, channel, topicId, blob) {
   if (stale.length) {
     await deleteMessages(client, channel, stale)
     log('info', 'drive', `Removed ${stale.length} previous vault message(s)`)
+  }
+
+  return message
+}
+
+export function isIndexMessage(message) {
+  if (!message) return false
+  return (
+    documentFileName(message) === INDEX_FILE_NAME ||
+    message.caption === INDEX_CAPTION ||
+    message.message === INDEX_CAPTION
+  )
+}
+
+export async function findIndexMessages(client, channel, topicId) {
+  const messages = await readTopic(client, channel, topicId, { limit: 50 })
+  return messages.filter(isIndexMessage).sort((a, b) => b.id - a.id)
+}
+
+export async function readIndexBlob(client, channel, topicId) {
+  const [message] = await findIndexMessages(client, channel, topicId)
+  if (!message) return null
+  const bytes = await downloadMessageBytes(client, message)
+  return { bytes, messageId: message.id }
+}
+
+export async function writeIndexBlob(client, channel, topicId, blob) {
+  const message = await sendDocumentToTopic({
+    client,
+    channel,
+    topicId,
+    name: INDEX_FILE_NAME,
+    data: blob,
+    caption: INDEX_CAPTION,
+  })
+
+  const previous = await findIndexMessages(client, channel, topicId)
+  const stale = previous.filter((item) => item.id !== message.id).map((item) => item.id)
+  if (stale.length) {
+    await deleteMessages(client, channel, stale)
+    log('info', 'drive', `Removed ${stale.length} previous index message(s)`)
   }
 
   return message

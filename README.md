@@ -2,7 +2,7 @@
 
 An encrypted, serverless drive that stores files in **your own private Telegram forum supergroup**. No backend, no database, no account to create — the browser talks MTProto directly to Telegram.
 
-> **Status: M2 in progress.** Vault recovery (M1) and a basic drive UI are in place: folders map to forum topics, single-file uploads are chunked/encrypted with vault-derived keys, and an encrypted manifest per file is stored in the folder topic for listing/download/delete. A full encrypted index, search, previews and trash are still to come. Treat this as a development build, not a backup product.
+> **Status: M3 in progress.** Vault recovery (M1), a basic drive UI (M2), and an encrypted drive index snapshot in `#index` are in place. Folders map to topics, uploads are chunked/encrypted with vault-derived keys, manifests are stored per file, and the index snapshot caches folder/file metadata for faster loading. Event log, local IndexedDB cache, search, previews and trash are still to come. Treat this as a development build, not a backup product.
 
 ---
 
@@ -114,8 +114,9 @@ The envelope is plaintext JSON containing only public parameters (`v`, `driveId`
 
 - **Folders ↔ topics:** folders are Telegram forum topics (names visible as topic titles). Reserved topics `#index` and `#trash` are hidden from the folder list.
 - **Upload:** requires an unlocked vault. Each file (≤200 MB, one at a time) is chunked, encrypted per chunk with a key derived from the master key (`HKDF-SHA-256`, `file-v1:<fileId>`), and uploaded as opaque documents.
-- **Manifest:** an encrypted manifest (`tgm1:<fileId>`) is stored in the same folder topic with file metadata and chunk references. The drive view scans folder messages for manifests and decrypts them locally to list files.
-- **Actions:** download (reassembles + verifies hashes) and delete (removes chunks and manifest). No encrypted global index/snapshot, search, previews, trash/retention, or resumable uploads yet.
+- **Manifest:** an encrypted manifest (`tgm1:<fileId>`) is stored in the same folder topic with file metadata and chunk references.
+- **Index snapshot:** an encrypted snapshot (`i.bin`, `tgi1`) in `#index` stores folder/file metadata so the drive can load without scanning every topic. It is updated on folder creation, upload, delete, and folder scans.
+- **Actions:** download (reassembles + verifies hashes) and delete (removes chunks and manifest). No event log, local IndexedDB cache, search, previews, trash/retention, or resumable uploads yet.
 
 ---
 
@@ -150,9 +151,10 @@ src/
     vault/vault.js        create / rewrap / unlock (Argon2id + AES-GCM)
     drive/manifest.js     encrypted per-file manifest format
     drive/files.js        upload/list/download/delete for topic files
+    drive/index.js        encrypted drive index snapshot format
     telegram/session.js   session string persistence
     telegram/topics.js    group, forum topic, message, upload helpers
-    telegram/drive.js     drive discovery + vault read/write in #index
+    telegram/drive.js     drive discovery + vault/index read/write in #index
     telegram/roundtrip.js M0 encrypt → upload → download → verify pipeline
   stores/auth.js          GramJS client lifecycle, QR/phone auth
   stores/vault.js         vault lifecycle; master key in module scope only
@@ -185,19 +187,21 @@ The GitHub repo is ready for a later “Connect to Git” step: push the repo, t
 
 ## Roadmap
 
-| Milestone | Scope                                                                                  |
-| --------- | -------------------------------------------------------------------------------------- |
-| **M0**    | MTProto login, group/topic lifecycle, encrypted chunk round-trip — **done**            |
-| **M1**    | Passphrase-derived vault, master key wrap/unwrap, cross-device recovery — **done**     |
-| **M2**    | Drive UI: folders ↔ topics, upload queue, chunk manifest — **basic slice done**        |
-| M3        | Encrypted index snapshot + event log in `#index`, local IndexedDB cache, MiniSearch    |
-| M4        | Search/filter by category (images/video/audio/documents), retry/resume, flood handling |
-| M5        | Previews ≤50 MB, trash + 30-day retention, download/export                             |
-| M6        | Polish: PWA/offline shell, themes, keyboard shortcuts, storage stats                   |
+| Milestone | Scope                                                                                                      |
+| --------- | ---------------------------------------------------------------------------------------------------------- |
+| **M0**    | MTProto login, group/topic lifecycle, encrypted chunk round-trip — **done**                                |
+| **M1**    | Passphrase-derived vault, master key wrap/unwrap, cross-device recovery — **done**                         |
+| **M2**    | Drive UI: folders ↔ topics, upload queue, chunk manifest — **basic slice done**                            |
+| **M3**    | Encrypted index snapshot + event log in `#index`, local IndexedDB cache, MiniSearch — **snapshot started** |
+| M4        | Search/filter by category (images/video/audio/documents), retry/resume, flood handling                     |
+| M4        | Search/filter by category (images/video/audio/documents), retry/resume, flood handling                     |
+| M5        | Previews ≤50 MB, trash + 30-day retention, download/export                                                 |
+| M6        | Polish: PWA/offline shell, themes, keyboard shortcuts, storage stats                                       |
 
 ## Known limitations
 
-- Drive UI is a basic M2 slice: folder/topic management and per-folder manifest scanning work, but there is no global encrypted index yet (listing scans topic messages).
+- Drive index snapshot is implemented (`i.bin` in `#index`), but there is no event log, local IndexedDB cache, or MiniSearch yet.
+- File listing may still scan a folder’s manifests on first visit/migration and then persist them into the snapshot.
 - No search, previews, trash/30-day retention, or resumable/retry-heavy uploads yet.
 - The M0 spike lab still uses its own ephemeral keys/path; normal uploads go through the vault-derived file keys.
 - Losing the vault passphrase means the drive cannot be recovered.
