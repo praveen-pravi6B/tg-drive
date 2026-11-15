@@ -89,11 +89,7 @@ onBeforeUnmount(() => {
     <header class="sticky top-0 z-30 border-b border-white/5 bg-background/70 backdrop-blur-xl">
       <div class="mx-auto flex h-14 w-full max-w-7xl items-center gap-4 px-5">
         <RouterLink to="/" class="flex items-center gap-2.5">
-          <span
-            class="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-sky-400 to-blue-600 text-white shadow-glow"
-          >
-            <Cloud class="h-4 w-4" />
-          </span>
+          <img src="/logo.png" alt="TGDrive" class="h-8 w-8 rounded-lg object-cover" />
           <span class="text-sm font-semibold tracking-tight">TGDrive</span>
         </RouterLink>
 
