@@ -114,8 +114,9 @@ export async function createDriveGroup(client, { title, driveId }) {
 }
 
 export async function getChannelFull(client, channel) {
-  const full = await client.invoke(
-    new Api.channels.GetFullChannel({ channel: toInputChannel(channel) }),
+  const full = await withFloodRetry(
+    () => client.invoke(new Api.channels.GetFullChannel({ channel: toInputChannel(channel) })),
+    { label: 'get channel' },
   )
   const chat = (full.chats || []).find((item) => String(item.id) === String(channel.id)) || channel
   return {
@@ -173,12 +174,16 @@ export async function disableForwards(client, channel) {
 }
 
 export async function createTopic(client, channel, title) {
-  const updates = await client.invoke(
-    new Api.channels.CreateForumTopic({
-      channel: toInputChannel(channel),
-      title,
-      randomId: randomBigInt(),
-    }),
+  const updates = await withFloodRetry(
+    () =>
+      client.invoke(
+        new Api.channels.CreateForumTopic({
+          channel: toInputChannel(channel),
+          title,
+          randomId: randomBigInt(),
+        }),
+      ),
+    { label: 'create topic' },
   )
   const topic = extractTopic(updates)
   if (!topic?.id) throw new Error('Topic created but Telegram did not return its id')
@@ -186,14 +191,18 @@ export async function createTopic(client, channel, title) {
 }
 
 export async function listTopics(client, channel, { limit = 100 } = {}) {
-  const result = await client.invoke(
-    new Api.channels.GetForumTopics({
-      channel: toInputChannel(channel),
-      limit,
-      offsetDate: 0,
-      offsetId: 0,
-      offsetTopic: 0,
-    }),
+  const result = await withFloodRetry(
+    () =>
+      client.invoke(
+        new Api.channels.GetForumTopics({
+          channel: toInputChannel(channel),
+          limit,
+          offsetDate: 0,
+          offsetId: 0,
+          offsetTopic: 0,
+        }),
+      ),
+    { label: 'list topics' },
   )
   return (result.topics || []).map((topic) => ({
     id: topic.id,
@@ -206,21 +215,29 @@ export async function listTopics(client, channel, { limit = 100 } = {}) {
 }
 
 export async function deleteTopic(client, channel, topicId) {
-  await client.invoke(
-    new Api.channels.DeleteTopicHistory({
-      channel: toInputChannel(channel),
-      topMsgId: topicId,
-    }),
+  await withFloodRetry(
+    () =>
+      client.invoke(
+        new Api.channels.DeleteTopicHistory({
+          channel: toInputChannel(channel),
+          topMsgId: topicId,
+        }),
+      ),
+    { label: 'delete topic' },
   )
 }
 
 export async function renameTopic(client, channel, topicId, title) {
-  await client.invoke(
-    new Api.channels.EditForumTopic({
-      channel: toInputChannel(channel),
-      topicId,
-      title,
-    }),
+  await withFloodRetry(
+    () =>
+      client.invoke(
+        new Api.channels.EditForumTopic({
+          channel: toInputChannel(channel),
+          topicId,
+          title,
+        }),
+      ),
+    { label: 'rename topic' },
   )
 }
 

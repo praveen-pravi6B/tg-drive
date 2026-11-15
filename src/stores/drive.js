@@ -453,6 +453,8 @@ export const useDriveStore = defineStore('drive', {
               this.uploadTask.stage = 'encrypting & uploading'
             } else if (event.type === 'chunk-upload-progress') {
               this.uploadTask.stage = `uploading chunk ${event.index + 1}/${this.uploadTask.chunkCount || '?'}`
+            } else if (event.type === 'chunk-retry') {
+              this.uploadTask.stage = `retrying chunk ${event.index + 1}/${this.uploadTask.chunkCount || '?'}`
             } else if (event.type === 'chunk-uploaded') {
               this.uploadTask.chunksDone = event.index + 1
               this.uploadTask.progress = Math.round(

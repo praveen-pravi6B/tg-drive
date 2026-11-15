@@ -191,18 +191,38 @@ export async function downloadFile({ client, channel, manifest, masterKey, onPro
 
   for (const chunk of ordered) {
     if (signal?.aborted) throw new DOMException('Download aborted', 'AbortError')
-    const [message] = await readMessages(client, channel, [chunk.messageId])
-    if (!message) throw new Error(`Missing chunk ${chunk.index + 1}`)
-    const encrypted = await downloadMessageBytes(client, message, (progress) =>
-      onProgress?.({ type: 'download-progress', index: chunk.index, progress }),
-    )
-    const aad = `${manifest.id}:${chunk.index}:${manifest.chunkCount}`
-    const { data, sha256 } = await decryptChunk({ key: fileKey, data: encrypted, aad })
-    if (chunk.sha256 && sha256 !== chunk.sha256)
-      throw new Error(`Chunk ${chunk.index + 1} failed verification`)
-    hasher.update(data)
-    parts.push(data)
-    onProgress?.({ type: 'chunk-downloaded', index: chunk.index })
+    let attempt = 0
+    const maxAttempts = 4
+    while (true) {
+      try {
+        const [message] = await readMessages(client, channel, [chunk.messageId])
+        if (!message) throw new Error(`Missing chunk ${chunk.index + 1}`)
+        const encrypted = await downloadMessageBytes(client, message, (progress) =>
+          onProgress?.({ type: 'download-progress', index: chunk.index, progress }),
+        )
+        const aad = `${manifest.id}:${chunk.index}:${manifest.chunkCount}`
+        const { data, sha256 } = await decryptChunk({ key: fileKey, data: encrypted, aad })
+        if (chunk.sha256 && sha256 !== chunk.sha256)
+          throw new Error(`Chunk ${chunk.index + 1} failed verification`)
+        hasher.update(data)
+        parts.push(data)
+        onProgress?.({ type: 'chunk-downloaded', index: chunk.index })
+        break
+      } catch (error) {
+        if (signal?.aborted) throw error
+        attempt += 1
+        if (attempt >= maxAttempts) throw error
+        const delay = Math.min(1500 * 2 ** (attempt - 1), 12000)
+        log(
+          'warn',
+          'drive',
+          `Chunk ${chunk.index + 1}/${ordered.length} download failed, retrying (${attempt}/${maxAttempts - 1})`,
+          error,
+        )
+        onProgress?.({ type: 'chunk-retry', index: chunk.index, attempt, delay })
+        await sleep(delay)
+      }
+    }
   }
 
   const hash = hasher.digest('hex')
