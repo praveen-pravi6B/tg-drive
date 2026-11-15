@@ -765,15 +765,39 @@ async function deletePermanentlyFile(manifest) {
   }
 }
 async function emptyTrashNow() {
-  const count = drive.trashFiles.length
+  const count = drive.trashFiles.length + drive.trashedFolders.length
   if (!count) return
   const ok = window.confirm(
-    `Empty Trash?\n\nThis permanently deletes ${count} item(s) and their encrypted chunks from Telegram.`,
+    `Empty Trash?\n\nThis permanently deletes ${count} item(s) and their encrypted data from Telegram.`,
   )
   if (!ok) return
   actionError.value = ''
   try {
     await drive.emptyTrash()
+  } catch (error) {
+    actionError.value = error.message
+  }
+}
+
+async function restoreFolder(folder) {
+  if (!folder) return
+  actionError.value = ''
+  try {
+    await drive.restoreFolder(folder.id)
+  } catch (error) {
+    actionError.value = error.message
+  }
+}
+
+async function deleteFolderPermanently(folder) {
+  if (!folder) return
+  const ok = window.confirm(
+    `Delete folder "${folder.title}" permanently?\n\nThis removes the folder and all its files from Telegram.`,
+  )
+  if (!ok) return
+  actionError.value = ''
+  try {
+    await drive.deleteFolderPermanently(folder.id)
   } catch (error) {
     actionError.value = error.message
   }
@@ -886,7 +910,7 @@ onBeforeUnmount(() => {
 
         <div v-if="ready" class="space-y-1">
           <button
-            v-for="folder in drive.folders"
+            v-for="folder in drive.activeFolders"
             :key="folder.id"
             type="button"
             class="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors hover:bg-white/5"
@@ -913,12 +937,15 @@ onBeforeUnmount(() => {
               <Trash2 class="h-3 w-3" />
             </span>
             <span class="truncate">Trash</span>
-            <span v-if="drive.trashFiles.length" class="ml-auto text-[10px] text-muted-foreground">
-              {{ drive.trashFiles.length }}
+            <span
+              v-if="drive.trashFiles.length + drive.trashedFolders.length"
+              class="ml-auto text-[10px] text-muted-foreground"
+            >
+              {{ drive.trashFiles.length + drive.trashedFolders.length }}
             </span>
           </button>
           <p
-            v-if="!drive.folders.length && drive.status === 'ready'"
+            v-if="!drive.activeFolders.length && drive.status === 'ready'"
             class="px-2 py-2 text-[11px] text-muted-foreground"
           >
             No folders yet. Use + New to create one.
@@ -951,7 +978,8 @@ onBeforeUnmount(() => {
           </div>
           <p class="text-xs text-muted-foreground">
             <template v-if="drive.showTrash">
-              {{ drive.trashFiles.length }} item(s) in trash · kept for 30 days
+              {{ drive.trashFiles.length + drive.trashedFolders.length }} item(s) in trash · kept
+              for 30 days
             </template>
             <template v-else>
               {{ visibleFiles.length }} shown · {{ drive.files.length }} items · encrypted on this
@@ -1004,7 +1032,7 @@ onBeforeUnmount(() => {
             v-if="drive.showTrash"
             variant="outline"
             size="md"
-            :disabled="!ready || !drive.trashFiles.length"
+            :disabled="!ready || !(drive.trashFiles.length + drive.trashedFolders.length)"
             @click="emptyTrashNow"
           >
             <Trash2 class="h-4 w-4" />
@@ -1171,7 +1199,10 @@ onBeforeUnmount(() => {
 
           <div
             v-else-if="
-              !visibleFiles.length && !drive.uploadTask?.running && !drive.uploadTask?.error
+              !visibleFiles.length &&
+              !(drive.showTrash && drive.trashedFolders.length) &&
+              !drive.uploadTask?.running &&
+              !drive.uploadTask?.error
             "
             class="rounded-xl border border-dashed border-white/10 px-6 py-16 text-center"
           >
@@ -1188,7 +1219,7 @@ onBeforeUnmount(() => {
             <p class="mt-1 text-xs text-muted-foreground">
               {{
                 drive.showTrash
-                  ? 'Deleted files will appear here for 30 days before being removed permanently.'
+                  ? 'Deleted files and folders will appear here for 30 days before being removed permanently.'
                   : drive.files.length
                     ? 'Try a different search or category filter.'
                     : 'Use + New → Upload files to add encrypted files.'
@@ -1196,8 +1227,47 @@ onBeforeUnmount(() => {
             </p>
           </div>
 
+          <div v-if="drive.showTrash && drive.trashedFolders.length" class="mb-4 space-y-2">
+            <div class="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              Deleted folders
+            </div>
+            <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              <div
+                v-for="folder in drive.trashedFolders"
+                :key="'tf-' + folder.id"
+                class="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.02] p-3"
+              >
+                <span class="grid h-9 w-9 place-items-center rounded-lg bg-white/5 text-red-300">
+                  <HardDrive class="h-4 w-4" />
+                </span>
+                <div class="min-w-0 flex-1">
+                  <div class="truncate text-sm font-medium">{{ folder.title }}</div>
+                  <div class="text-[11px] text-muted-foreground">Folder · in trash</div>
+                </div>
+                <div class="flex items-center gap-1">
+                  <button
+                    type="button"
+                    class="rounded-md p-1.5 text-muted-foreground hover:bg-white/5 hover:text-foreground"
+                    title="Restore folder"
+                    @click="restoreFolder(folder)"
+                  >
+                    <RotateCcw class="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-md p-1.5 text-muted-foreground hover:bg-red-500/10 hover:text-red-300"
+                    title="Delete permanently"
+                    @click="deleteFolderPermanently(folder)"
+                  >
+                    <Trash2 class="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div
-            v-else-if="viewMode === 'grid'"
+            v-if="visibleFiles.length && viewMode === 'grid'"
             class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
           >
             <div

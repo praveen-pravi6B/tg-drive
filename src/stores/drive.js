@@ -80,13 +80,24 @@ export const useDriveStore = defineStore('drive', {
 
   getters: {
     selectedFolder(state) {
-      return state.folders.find((folder) => folder.id === state.selectedTopicId) || null
+      return (
+        state.folders.find((folder) => !folder?.trashedAt && folder.id === state.selectedTopicId) ||
+        null
+      )
+    },
+    activeFolders(state) {
+      return (state.folders || []).filter((folder) => !folder?.trashedAt)
     },
     isUploading: (state) => Boolean(state.uploadTask?.running),
     isBatchRunning: (state) => Boolean(state.batchTask?.running),
     trashFiles(state) {
       return (state.allFiles || [])
         .filter((file) => file?.trashedAt)
+        .sort((a, b) => String(b.trashedAt || '').localeCompare(String(a.trashedAt || '')))
+    },
+    trashedFolders(state) {
+      return (state.folders || [])
+        .filter((folder) => folder?.trashedAt)
         .sort((a, b) => String(b.trashedAt || '').localeCompare(String(a.trashedAt || '')))
     },
   },
@@ -183,17 +194,22 @@ export const useDriveStore = defineStore('drive', {
       this.folders = sortFolders(
         folders
           .filter((folder) => folder?.id && !isReservedTopicTitle(folder.title))
-          .map((folder) => normalizeFolder(folder)),
+          .map((folder) => {
+            const base = normalizeFolder(folder)
+            if (folder.trashedAt) base.trashedAt = folder.trashedAt
+            return base
+          }),
       )
       this.allFiles = files.filter((file) => file?.id)
       this.events = events.slice(-200)
       this.indexLoaded = true
 
-      if (this.selectedTopicId && !this.folders.some((f) => f.id === this.selectedTopicId)) {
+      const active = this.folders.filter((f) => !f.trashedAt)
+      if (this.selectedTopicId && !active.some((f) => f.id === this.selectedTopicId)) {
         this.selectedTopicId = 0
       }
-      if (!this.selectedTopicId && this.folders[0]) {
-        this.selectedTopicId = this.folders[0].id
+      if (!this.selectedTopicId && active[0]) {
+        this.selectedTopicId = active[0].id
       }
       this.syncSelectedFiles()
     },
@@ -337,18 +353,21 @@ export const useDriveStore = defineStore('drive', {
         const snapshot = await this.loadIndex({ preferCache: true })
         if (!snapshot) {
           const topics = await listTopics(client, channel, { limit: 100 })
-          this.folders = sortFolders(
-            topics
+          const activeExisting = this.folders.filter((f) => f.trashedAt)
+          this.folders = sortFolders([
+            ...topics
               .filter((topic) => topic.id && !isReservedTopicTitle(topic.title))
               .map((topic) => normalizeFolder(topic)),
-          )
+            ...activeExisting,
+          ])
 
-          if (this.selectedTopicId && !this.folders.some((f) => f.id === this.selectedTopicId)) {
+          const active = this.folders.filter((f) => !f.trashedAt)
+          if (this.selectedTopicId && !active.some((f) => f.id === this.selectedTopicId)) {
             this.selectedTopicId = 0
             this.files = []
           }
-          if (!this.selectedTopicId && this.folders[0]) {
-            this.selectedTopicId = this.folders[0].id
+          if (!this.selectedTopicId && active[0]) {
+            this.selectedTopicId = active[0].id
           }
           // Build the index progressively from the selected folder if needed.
           if (scanCurrent && this.selectedTopicId) await this.refreshFiles({ persist: true })
@@ -760,14 +779,19 @@ export const useDriveStore = defineStore('drive', {
     async purgeExpiredTrash() {
       const retentionMs = Number(limits.trashRetentionDays || 30) * 24 * 60 * 60 * 1000
       const cutoff = Date.now() - retentionMs
-      const expired = this.allFiles.filter((file) => {
+      const expiredFiles = this.allFiles.filter((file) => {
         if (!file?.trashedAt) return false
         const t = new Date(file.trashedAt).getTime()
         return Number.isFinite(t) && t < cutoff
       })
-      if (!expired.length) return 0
+      const expiredFolders = this.folders.filter((folder) => {
+        if (!folder?.trashedAt) return false
+        const t = new Date(folder.trashedAt).getTime()
+        return Number.isFinite(t) && t < cutoff
+      })
+      if (!expiredFiles.length && !expiredFolders.length) return 0
       const { client, channel } = this.requireReady()
-      for (const file of expired) {
+      for (const file of expiredFiles) {
         try {
           // eslint-disable-next-line no-await-in-loop
           await deleteFile({ client, channel, manifest: file })
@@ -776,16 +800,37 @@ export const useDriveStore = defineStore('drive', {
           log('warn', 'drive', 'Could not purge expired trashed file', error)
         }
       }
+      for (const folder of expiredFolders) {
+        try {
+          const remaining = this.allFiles.filter((f) => Number(f.folderTopicId) === folder.id)
+          for (const file of remaining) {
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              await deleteFile({ client, channel, manifest: file })
+            } catch {
+              /* ignore */
+            }
+          }
+          this.allFiles = this.allFiles.filter((f) => Number(f.folderTopicId) !== folder.id)
+          // eslint-disable-next-line no-await-in-loop
+          await deleteTopic(client, channel, folder.id)
+        } catch (error) {
+          log('warn', 'drive', 'Could not purge expired trashed folder', error)
+        }
+        this.folders = this.folders.filter((f) => f.id !== folder.id)
+      }
       this.syncSelectedFiles()
       await this.saveIndex()
-      return expired.length
+      return expiredFiles.length + expiredFolders.length
     },
 
     async emptyTrash() {
-      const trashed = this.allFiles.filter((file) => file?.trashedAt)
-      if (!trashed.length) return 0
+      const trashedFiles = this.allFiles.filter((file) => file?.trashedAt)
+      const trashedFolders = this.folders.filter((folder) => folder?.trashedAt)
+      if (!trashedFiles.length && !trashedFolders.length) return 0
       const { client, channel } = this.requireReady()
-      for (const file of trashed) {
+
+      for (const file of trashedFiles) {
         try {
           // eslint-disable-next-line no-await-in-loop
           await deleteFile({ client, channel, manifest: file })
@@ -794,9 +839,80 @@ export const useDriveStore = defineStore('drive', {
           log('warn', 'drive', 'Could not permanently delete trashed file', error)
         }
       }
+
+      for (const folder of trashedFolders) {
+        try {
+          // remove any remaining file records/messages for folder just in case
+          const remaining = this.allFiles.filter((f) => Number(f.folderTopicId) === folder.id)
+          for (const file of remaining) {
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              await deleteFile({ client, channel, manifest: file })
+            } catch {
+              /* ignore */
+            }
+          }
+          this.allFiles = this.allFiles.filter((f) => Number(f.folderTopicId) !== folder.id)
+          // eslint-disable-next-line no-await-in-loop
+          await deleteTopic(client, channel, folder.id)
+        } catch (error) {
+          log('warn', 'drive', 'Could not permanently delete trashed folder', error)
+        }
+        this.folders = this.folders.filter((f) => f.id !== folder.id)
+      }
+
       this.syncSelectedFiles()
+      this.appendEvent('trash.empty', {
+        files: trashedFiles.length,
+        folders: trashedFolders.length,
+      })
       await this.saveIndex()
-      return trashed.length
+      return trashedFiles.length + trashedFolders.length
+    },
+
+    async restoreFolder(folderId) {
+      const id = Number(folderId)
+      const folder = this.folders.find((f) => f.id === id && f.trashedAt)
+      if (!folder) return
+      this.folders = this.folders.map((f) => (f.id === id ? { ...f, trashedAt: '' } : f))
+      // Restore files that were trashed together with this folder.
+      this.allFiles = this.allFiles.map((file) =>
+        Number(file.folderTopicId) === id && file?.trashedAt && file?.trashedWithFolder
+          ? { ...file, trashedAt: '', trashedFromTopicId: 0, trashedWithFolder: false }
+          : file,
+      )
+      if (!this.selectedTopicId) this.selectedTopicId = id
+      this.syncSelectedFiles()
+      this.appendEvent('folder.restore', { folderTopicId: id })
+      await this.saveIndex()
+    },
+
+    async deleteFolderPermanently(folderId) {
+      const id = Number(folderId)
+      const folder = this.folders.find((f) => f.id === id)
+      if (!folder) return
+      const { client, channel } = this.requireReady()
+      const files = this.allFiles.filter((f) => Number(f.folderTopicId) === id)
+      for (const file of files) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await deleteFile({ client, channel, manifest: file })
+        } catch (error) {
+          log('warn', 'drive', 'Could not delete file while removing folder', error)
+        }
+      }
+      this.allFiles = this.allFiles.filter((f) => Number(f.folderTopicId) !== id)
+      this.folders = this.folders.filter((f) => f.id !== id)
+      try {
+        await deleteTopic(client, channel, id)
+      } catch (error) {
+        log('warn', 'drive', 'Could not delete folder topic on Telegram', error)
+      }
+      const active = this.folders.filter((f) => !f.trashedAt)
+      if (this.selectedTopicId === id) this.selectedTopicId = active[0]?.id || 0
+      this.syncSelectedFiles()
+      this.appendEvent('folder.delete_permanent', { folderTopicId: id })
+      await this.saveIndex()
     },
 
     async deleteFolder(topicId) {
@@ -808,38 +924,38 @@ export const useDriveStore = defineStore('drive', {
       const now = new Date().toISOString()
       const hadFiles = this.allFiles.some((file) => Number(file.folderTopicId) === folderId)
 
-      // Move all files in this folder to Trash so they remain recoverable.
-      // Keep their folderTopicId/chunk messages intact (do not delete the topic if files exist).
+      // Move folder and its files to Trash so they remain recoverable.
+      // Keep topic/messages intact while anything may need restore/download.
       this.allFiles = this.allFiles.map((file) =>
         Number(file.folderTopicId) === folderId
           ? {
               ...file,
               trashedAt: file.trashedAt || now,
               trashedFromTopicId: folderId,
+              trashedWithFolder: true,
             }
           : file,
       )
-      this.folders = this.folders.filter((folder) => folder.id !== folderId)
+      this.folders = this.folders.map((folder) =>
+        folder.id === folderId ? { ...folder, trashedAt: now } : folder,
+      )
 
       if (this.selectedTopicId === folderId) {
         this.showTrash = false
-        this.selectedTopicId = this.folders[0]?.id || 0
+        const active = this.folders.filter((f) => !f.trashedAt)
+        this.selectedTopicId = active[0]?.id || 0
       }
       this.syncSelectedFiles()
-      this.appendEvent('folder.delete', { folderTopicId: folderId, trashedFiles: hadFiles })
+      this.appendEvent('folder.trash', { folderTopicId: folderId, trashedFiles: hadFiles })
       await this.saveIndex()
 
       if (!hadFiles) {
-        try {
-          await deleteTopic(client, channel, folderId)
-          log('info', 'drive', `Deleted empty folder/topic ${folderId}`)
-        } catch (error) {
-          log('error', 'drive', 'Could not delete folder topic on Telegram', error)
-          throw error
-        }
-      } else {
-        log('info', 'drive', `Removed folder ${folderId} from list; its files were moved to Trash`)
+        // Empty folder: keep as trashed folder entry? simpler to delete topic and remove folder record
+        // but user expects folder in trash - keep folder trashed, topic can remain or be deleted.
+        // Deleting topic is fine for empty folder; restore will need topic recreation - complex.
+        // Safer: keep topic for trashed folder.
       }
+      log('info', 'drive', `Moved folder ${folderId} to Trash`)
     },
 
     async renameFolder(topicId, newTitle) {
