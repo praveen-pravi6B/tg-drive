@@ -1,0 +1,61 @@
+{
+  "name": "tg-drive",
+  "version": "0.1.0",
+  "description": "Encrypted, serverless cloud drive backed by a private Telegram forum supergroup.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "smoke": "npm run build && node scripts/smoke.mjs"
+  },
+  "keywords": [
+    "telegram",
+    "drive",
+    "encryption",
+    "vue",
+    "vite",
+    "mtproto",
+    "serverless"
+  ],
+  "license": "UNLICENSED",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@lucide/vue": "^1.73.0",
+    "@vueuse/core": "^15.0.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.4.0",
+    "dexie": "^4.4.7",
+    "fflate": "^0.8.3",
+    "hash-wasm": "^4.13.0",
+    "minisearch": "^7.2.0",
+    "pinia": "^4.1.0",
+    "process": "^0.11.10",
+    "qrcode": "^1.5.4",
+    "tailwind-merge": "^3.7.0",
+    "telegram": "^2.26.22",
+    "vue": "^3.5.45",
+    "vue-router": "^5.5.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@vitejs/plugin-vue": "^6.0.11",
+    "autoprefixer": "^10.6.2",
+    "eslint": "^10.15.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-vue": "^10.12.1",
+    "globals": "^17.14.0",
+    "postcss": "^8.5.33",
+    "prettier": "^3.10.1",
+    "puppeteer-core": "^25.17.0",
+    "tailwindcss": "^3.4.19",
+    "vite": "^8.3.8",
+    "vite-plugin-node-polyfills": "^0.28.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
