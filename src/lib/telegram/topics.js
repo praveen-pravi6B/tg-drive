@@ -29,6 +29,19 @@ export function toInputChannel(channel) {
   })
 }
 
+/**
+ * `folders.EditPeerFolders` requires an InputPeer, not an InputChannel.
+ * Passing InputChannel there is serialized with the wrong constructor and
+ * Telegram rejects the request.
+ */
+export function toInputPeerChannel(channel) {
+  if (!channel?.id) throw new Error('Invalid channel reference')
+  return new Api.InputPeerChannel({
+    channelId: bigInt(String(channel.id)),
+    accessHash: bigInt(String(channel.accessHash || 0)),
+  })
+}
+
 function extractMessages(updates) {
   const list = updates?.updates || []
   return list.map((update) => update.message).filter(Boolean)
@@ -64,27 +77,34 @@ export async function createDriveGroup(client, { title, driveId }) {
   if (!channel) throw new Error('Telegram did not return the created supergroup')
 
   const result = { channel: serializeChannel(channel), archived: false, forwardsDisabled: false }
+  const peer = toInputPeerChannel(result.channel)
 
   try {
-    await client.invoke(
-      new Api.messages.ToggleNoForwards({ peer: toInputChannel(result.channel), enabled: true }),
-    )
+    await client.invoke(new Api.messages.ToggleNoForwards({ peer, enabled: true }))
     result.forwardsDisabled = true
   } catch (error) {
-    log('warn', 'telegram', 'Could not disable forwarding', error)
+    log(
+      'warn',
+      'telegram',
+      `Could not disable forwarding: ${error?.errorMessage || error?.message || error}`,
+      error,
+    )
   }
 
   try {
     await client.invoke(
       new Api.folders.EditPeerFolders({
-        folderPeers: [
-          new Api.InputFolderPeer({ peer: toInputChannel(result.channel), folderId: 1 }),
-        ],
+        folderPeers: [new Api.InputFolderPeer({ peer, folderId: 1 })],
       }),
     )
     result.archived = true
   } catch (error) {
-    log('warn', 'telegram', 'Could not archive the group', error)
+    log(
+      'warn',
+      'telegram',
+      `Could not archive the group: ${error?.errorMessage || error?.message || error}`,
+      error,
+    )
   }
 
   return result
@@ -123,14 +143,14 @@ export async function findDriveGroup(client, driveId, { limit = 100 } = {}) {
 export async function archiveChannel(client, channel) {
   await client.invoke(
     new Api.folders.EditPeerFolders({
-      folderPeers: [new Api.InputFolderPeer({ peer: toInputChannel(channel), folderId: 1 })],
+      folderPeers: [new Api.InputFolderPeer({ peer: toInputPeerChannel(channel), folderId: 1 })],
     }),
   )
 }
 
 export async function disableForwards(client, channel) {
   await client.invoke(
-    new Api.messages.ToggleNoForwards({ peer: toInputChannel(channel), enabled: true }),
+    new Api.messages.ToggleNoForwards({ peer: toInputPeerChannel(channel), enabled: true }),
   )
 }
 

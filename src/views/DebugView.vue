@@ -284,7 +284,7 @@ async function reArchive() {
     log('info', 'spike', 'Group moved to the Telegram Archive folder')
   } catch (error) {
     if (auth.handleAuthError(error)) return
-    log('error', 'spike', 'Archive failed', error)
+    log('error', 'spike', `Archive failed: ${errorMessage(error)}`, error)
   } finally {
     busy.value = ''
   }
