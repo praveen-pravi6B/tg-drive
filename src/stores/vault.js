@@ -1,5 +1,7 @@
 import { defineStore } from 'pinia'
 import { useAuthStore } from './auth'
+import { storageKeys } from '@/lib/config'
+import { fromBase64, toBase64 } from '@/lib/crypto/bytes'
 import { errorMessage, log } from '@/lib/logger'
 import {
   clearDriveState,
@@ -11,11 +13,80 @@ import {
 import { VAULT_TOPIC_TITLE, parseEnvelope } from '@/lib/vault/format'
 import { createVault, unlockVault, validatePassphrase } from '@/lib/vault/vault'
 
-// The master key stays in module scope on purpose: it is never reactive, never
-// persisted, and never leaves this tab. Losing it only costs a passphrase entry.
+const UNLOCK_TTL_MS = 60 * 60 * 1000
+
+// The master key stays in module scope on purpose: it is never reactive.
+// A short-lived local cache (1h) can restore it across reloads for convenience.
 let masterKey = null
 let vaultBlob = null
 let inflight = null
+
+function setUnlockCookie(expiresAt) {
+  try {
+    const maxAge = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000))
+    document.cookie = `tgdrive_unlocked=1; Max-Age=${maxAge}; Path=/; SameSite=Strict`
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearUnlockCookie() {
+  try {
+    document.cookie = 'tgdrive_unlocked=; Max-Age=0; Path=/; SameSite=Strict'
+  } catch {
+    /* ignore */
+  }
+}
+
+function saveUnlockCache(driveId) {
+  if (!masterKey || !driveId) return
+  const payload = {
+    driveId,
+    key: toBase64(masterKey),
+    expiresAt: Date.now() + UNLOCK_TTL_MS,
+  }
+  try {
+    localStorage.setItem(storageKeys.vaultUnlock, JSON.stringify(payload))
+    setUnlockCookie(payload.expiresAt)
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearUnlockCache() {
+  try {
+    localStorage.removeItem(storageKeys.vaultUnlock)
+  } catch {
+    /* ignore */
+  }
+  clearUnlockCookie()
+}
+
+function restoreUnlockCache(driveId) {
+  try {
+    const raw = localStorage.getItem(storageKeys.vaultUnlock)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed || parsed.driveId !== driveId || !parsed.key || !parsed.expiresAt) {
+      clearUnlockCache()
+      return null
+    }
+    if (parsed.expiresAt <= Date.now()) {
+      clearUnlockCache()
+      return null
+    }
+    const key = fromBase64(parsed.key)
+    if (key.length !== 32) {
+      clearUnlockCache()
+      return null
+    }
+    setUnlockCookie(parsed.expiresAt)
+    return key
+  } catch {
+    clearUnlockCache()
+    return null
+  }
+}
 
 export function getMasterKey() {
   return masterKey
@@ -23,6 +94,7 @@ export function getMasterKey() {
 
 export function clearMasterKey() {
   masterKey = null
+  clearUnlockCache()
 }
 
 export const useVaultStore = defineStore('vault', {
@@ -56,6 +128,7 @@ export const useVaultStore = defineStore('vault', {
       masterKey = null
       vaultBlob = null
       inflight = null
+      clearUnlockCache()
       this.$reset()
     },
 
@@ -94,7 +167,17 @@ export const useVaultStore = defineStore('vault', {
           vaultBlob = stored.bytes
           this.vaultMessageId = stored.messageId
           this.envelope = parseEnvelope(stored.bytes)
+
+          if (!masterKey) {
+            const cached = restoreUnlockCache(this.driveId)
+            if (cached) {
+              masterKey = cached
+              log('info', 'vault', 'Restored unlocked vault from temporary cache')
+            }
+          }
+
           this.status = masterKey ? 'unlocked' : 'locked'
+          if (masterKey && !this.unlockedAt) this.unlockedAt = Date.now()
           log('info', 'vault', `Vault found for ${this.driveId}`, {
             messageId: stored.messageId,
             kdf: this.envelope.kdf.alg,
@@ -136,6 +219,7 @@ export const useVaultStore = defineStore('vault', {
         this.vaultMessageId = message.id
         this.status = 'unlocked'
         this.unlockedAt = Date.now()
+        saveUnlockCache(this.driveId)
         log('info', 'vault', 'Vault created and stored encrypted in #index', {
           messageId: message.id,
         })
@@ -166,6 +250,7 @@ export const useVaultStore = defineStore('vault', {
         masterKey = key
         this.status = 'unlocked'
         this.unlockedAt = Date.now()
+        saveUnlockCache(this.driveId)
         log('info', 'vault', 'Vault unlocked for this tab')
       } catch (error) {
         this.error = errorMessage(error)
@@ -179,6 +264,7 @@ export const useVaultStore = defineStore('vault', {
     lock() {
       masterKey = null
       this.unlockedAt = 0
+      clearUnlockCache()
       this.status = this.envelope ? 'locked' : 'no-vault'
       log('info', 'vault', 'Vault locked; master key dropped from memory')
     },
@@ -188,6 +274,7 @@ export const useVaultStore = defineStore('vault', {
      * signing in again re-discovers the drive by its about marker.
      */
     forgetDevice() {
+      clearUnlockCache()
       clearDriveState()
       this.reset()
       log('info', 'vault', 'This device forgot the drive (Telegram data untouched)')

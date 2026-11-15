@@ -262,7 +262,12 @@ function onGlobalKey(e) {
     renameTarget.value = null
   }
   if (preview.value) {
-    if (preview.value.kind === 'video' && e.key === ' ' && e.target?.tagName !== 'INPUT' && e.target?.tagName !== 'TEXTAREA') {
+    if (
+      preview.value.kind === 'video' &&
+      e.key === ' ' &&
+      e.target?.tagName !== 'INPUT' &&
+      e.target?.tagName !== 'TEXTAREA'
+    ) {
       e.preventDefault()
       togglePlay()
     }

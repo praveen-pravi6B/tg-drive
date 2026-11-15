@@ -66,4 +66,5 @@ export const storageKeys = {
   debugDriveId: 'tgdrive.debug.driveid.v1',
   drive: 'tgdrive.drive.v1',
   vault: 'tgdrive.vault.v1',
+  vaultUnlock: 'tgdrive.vault.unlock.v1',
 }
