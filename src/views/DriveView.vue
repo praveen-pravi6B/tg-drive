@@ -160,16 +160,17 @@ onMounted(async () => {
           </button>
         </div>
 
-        <div
-          v-if="ready"
-          class="space-y-1"
-        >
+        <div v-if="ready" class="space-y-1">
           <button
             v-for="folder in drive.folders"
             :key="folder.id"
             type="button"
             class="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors hover:bg-white/5"
-            :class="folder.id === drive.selectedTopicId ? 'bg-white/5 text-foreground' : 'text-muted-foreground'"
+            :class="
+              folder.id === drive.selectedTopicId
+                ? 'bg-white/5 text-foreground'
+                : 'text-muted-foreground'
+            "
             @click="drive.selectFolder(folder.id)"
           >
             <FolderClosed
@@ -185,18 +186,12 @@ onMounted(async () => {
             No folders yet. Create one to start uploading.
           </p>
         </div>
-        <p
-          v-else
-          class="px-2 py-2 text-[11px] text-muted-foreground"
-        >
+        <p v-else class="px-2 py-2 text-[11px] text-muted-foreground">
           Unlock the vault to see folders.
         </p>
       </div>
 
-      <div
-        v-if="ready"
-        class="space-y-2 rounded-xl border border-white/5 bg-white/[0.02] p-3"
-      >
+      <div v-if="ready" class="space-y-2 rounded-xl border border-white/5 bg-white/[0.02] p-3">
         <div class="flex items-center gap-2 text-xs font-medium">
           <FolderPlus class="h-3.5 w-3.5 text-sky-300" />
           New folder
@@ -215,10 +210,7 @@ onMounted(async () => {
         >
           Create
         </AppButton>
-        <p
-          v-if="folderError"
-          class="text-[11px] text-red-300"
-        >
+        <p v-if="folderError" class="text-[11px] text-red-300">
           {{ folderError }}
         </p>
       </div>
@@ -229,10 +221,7 @@ onMounted(async () => {
       >
         <KeyRound class="h-3.5 w-3.5" />
         Vault
-        <AppBadge
-          :tone="vaultBadge.tone"
-          class="ml-auto"
-        >{{ vaultBadge.label }}</AppBadge>
+        <AppBadge :tone="vaultBadge.tone" class="ml-auto">{{ vaultBadge.label }}</AppBadge>
       </RouterLink>
     </aside>
 
@@ -243,12 +232,7 @@ onMounted(async () => {
             <h1 class="truncate text-lg font-semibold tracking-tight">
               {{ drive.selectedFolder?.title || 'My Drive' }}
             </h1>
-            <AppBadge
-              tone="info"
-              dot
-            >
-              M2 drive
-            </AppBadge>
+            <AppBadge tone="info" dot> M2 drive </AppBadge>
           </div>
           <p class="text-xs text-muted-foreground">
             {{ limits.maxFileSize / (1024 * 1024) }} MB per file ·
@@ -265,14 +249,10 @@ onMounted(async () => {
             <RefreshCw class="h-4 w-4" />
             Refresh
           </AppButton>
-          <input
-            ref="fileInput"
-            type="file"
-            class="hidden"
-            @change="onFilePicked"
-          >
+          <input ref="fileInput" type="file" class="hidden" @change="onFilePicked" />
           <AppButton
             :disabled="!ready || !drive.selectedTopicId || drive.isUploading"
+            :title="!drive.selectedTopicId ? 'Create or select a folder first' : ''"
             @click="pickFile"
           >
             <Upload class="h-4 w-4" />
@@ -288,11 +268,7 @@ onMounted(async () => {
         {{ actionError || drive.error || vault.error }}
       </div>
 
-      <AppCard
-        v-if="checking"
-        title="Loading drive"
-        description="Resolving the vault and group"
-      >
+      <AppCard v-if="checking" title="Loading drive" description="Resolving the vault and group">
         <div class="flex items-center gap-3 py-4 text-sm text-muted-foreground">
           <LoaderCircle class="h-4 w-4 animate-spin text-sky-300" />
           Checking your Telegram drive…
@@ -305,12 +281,13 @@ onMounted(async () => {
         description="Files are encrypted with a key only your passphrase can unlock"
       >
         <p class="text-sm text-muted-foreground">
-          {{ vault.status === 'no-vault' ? 'Create a vault to generate your master key and start uploading.' : 'Unlock your vault to derive file keys and access this drive.' }}
+          {{
+            vault.status === 'no-vault'
+              ? 'Create a vault to generate your master key and start uploading.'
+              : 'Unlock your vault to derive file keys and access this drive.'
+          }}
         </p>
-        <RouterLink
-          to="/vault"
-          class="mt-4 inline-block"
-        >
+        <RouterLink to="/vault" class="mt-4 inline-block">
           <AppButton>
             <KeyRound class="h-4 w-4" />
             {{ vault.status === 'no-vault' ? 'Create vault' : 'Unlock vault' }}
@@ -327,11 +304,7 @@ onMounted(async () => {
               class="flex-1"
               @keydown.enter.prevent="createFolder"
             />
-            <AppButton
-              variant="outline"
-              :loading="drive.creatingFolder"
-              @click="createFolder"
-            >
+            <AppButton variant="outline" :loading="drive.creatingFolder" @click="createFolder">
               <FolderPlus class="h-4 w-4" />
             </AppButton>
           </div>
@@ -341,7 +314,11 @@ onMounted(async () => {
               :key="folder.id"
               type="button"
               class="rounded-full border px-3 py-1 text-xs"
-              :class="folder.id === drive.selectedTopicId ? 'border-sky-400/40 bg-sky-400/10 text-sky-200' : 'border-white/10 text-muted-foreground'"
+              :class="
+                folder.id === drive.selectedTopicId
+                  ? 'border-sky-400/40 bg-sky-400/10 text-sky-200'
+                  : 'border-white/10 text-muted-foreground'
+              "
               @click="drive.selectFolder(folder.id)"
             >
               {{ folder.title }}
@@ -351,38 +328,32 @@ onMounted(async () => {
 
         <AppCard
           v-if="drive.upload"
-          :title="`Upload: ${drive.upload.fileName}`"
+          :title="`Upload: ${drive.upload.fileName || 'file'}`"
           description="Encrypted on this device before sending"
         >
           <div class="space-y-2">
             <div class="flex items-center justify-between text-xs text-muted-foreground">
-              <span class="capitalize">{{ drive.upload.stage }}</span>
-              <span>{{ drive.upload.progress }}%</span>
+              <span class="capitalize">{{ drive.upload.stage || 'starting' }}</span>
+              <span>{{ Number(drive.upload.progress || 0) }}%</span>
             </div>
             <div class="h-2 overflow-hidden rounded-full bg-white/5">
               <div
                 class="h-full rounded-full bg-sky-400 transition-all"
-                :style="{ width: `${drive.upload.progress}%` }"
+                :style="{ width: `${Number(drive.upload.progress || 0)}%` }"
               />
             </div>
             <div class="flex items-center gap-2">
-              <p
-                v-if="drive.upload.error"
-                class="text-xs text-red-300"
-              >
+              <p v-if="drive.upload.error" class="text-xs text-red-300">
                 {{ drive.upload.error }}
               </p>
-              <p
-                v-else-if="drive.upload.done"
-                class="text-xs text-emerald-300"
-              >
+              <p v-else-if="drive.upload.done" class="text-xs text-emerald-300">
                 Upload complete and manifest saved.
               </p>
-              <p
-                v-else
-                class="text-xs text-muted-foreground"
-              >
-                {{ drive.upload.chunksDone }}/{{ drive.upload.chunkCount || '…' }} chunks uploaded
+              <p v-else class="text-xs text-muted-foreground">
+                {{ Number(drive.upload.chunksDone || 0) }}/{{
+                  drive.upload.chunkCount || '…'
+                }}
+                chunks uploaded
               </p>
               <div class="ml-auto flex gap-2">
                 <AppButton
@@ -393,12 +364,7 @@ onMounted(async () => {
                 >
                   Cancel
                 </AppButton>
-                <AppButton
-                  v-else
-                  size="sm"
-                  variant="ghost"
-                  @click="drive.clearUpload()"
-                >
+                <AppButton v-else size="sm" variant="ghost" @click="drive.clearUpload()">
                   Dismiss
                 </AppButton>
               </div>
@@ -422,13 +388,7 @@ onMounted(async () => {
           :description="`${drive.files.length} item${drive.files.length === 1 ? '' : 's'}`"
         >
           <template #actions>
-            <AppBadge
-              v-if="drive.filesLoading"
-              tone="neutral"
-              dot
-            >
-              Loading
-            </AppBadge>
+            <AppBadge v-if="drive.filesLoading" tone="neutral" dot> Loading </AppBadge>
           </template>
 
           <div
@@ -444,38 +404,28 @@ onMounted(async () => {
             class="rounded-xl border border-dashed border-white/10 px-6 py-10 text-center"
           >
             <HardDrive class="mx-auto h-8 w-8 text-muted-foreground/50" />
-            <p class="mt-3 text-sm font-medium">
-              No files yet
-            </p>
+            <p class="mt-3 text-sm font-medium">No files yet</p>
             <p class="mt-1 text-xs text-muted-foreground">
               Upload a file and it will be chunked, encrypted, and stored in this folder.
             </p>
           </div>
 
-          <ul
-            v-else
-            class="divide-y divide-white/5"
-          >
-            <li
-              v-for="item in drive.files"
-              :key="item.id"
-              class="flex items-center gap-3 py-3"
-            >
-              <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/5 text-sky-300">
-                <component
-                  :is="iconFor(item.category)"
-                  class="h-4 w-4"
-                />
+          <ul v-else class="divide-y divide-white/5">
+            <li v-for="item in drive.files" :key="item.id" class="flex items-center gap-3 py-3">
+              <span
+                class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/5 text-sky-300"
+              >
+                <component :is="iconFor(item.category)" class="h-4 w-4" />
               </span>
               <div class="min-w-0 flex-1">
-                <div
-                  class="truncate text-sm font-medium"
-                  :title="item.name"
-                >
+                <div class="truncate text-sm font-medium" :title="item.name">
                   {{ item.name }}
                 </div>
                 <div class="text-[11px] text-muted-foreground">
-                  {{ formatBytes(item.size) }} · {{ item.chunkCount }} chunk{{ item.chunkCount === 1 ? '' : 's' }} · {{ item.category }} · {{ formatDate(item.createdAt) }}
+                  {{ formatBytes(item.size) }} · {{ item.chunkCount }} chunk{{
+                    item.chunkCount === 1 ? '' : 's'
+                  }}
+                  · {{ item.category }} · {{ formatDate(item.createdAt) }}
                 </div>
               </div>
               <div class="flex shrink-0 items-center gap-1">
@@ -505,7 +455,8 @@ onMounted(async () => {
       </template>
 
       <p class="text-[11px] text-muted-foreground/70">
-        Folder names are topic titles in Telegram. File names and manifests are encrypted; chunk documents use opaque ids.
+        Folder names are topic titles in Telegram. File names and manifests are encrypted; chunk
+        documents use opaque ids.
       </p>
     </section>
   </div>

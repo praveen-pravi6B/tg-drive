@@ -41,7 +41,7 @@ export const useDriveStore = defineStore('drive', {
     selectedFolder(state) {
       return state.folders.find((folder) => folder.id === state.selectedTopicId) || null
     },
-    isUploading: (state) => Boolean(state.upload && !state.upload.done && !state.upload.error),
+    isUploading: (state) => Boolean(state.upload?.running),
   },
 
   actions: {
@@ -267,7 +267,7 @@ export const useDriveStore = defineStore('drive', {
       const { client, channel, masterKey } = this.requireReady()
       uploadAbort = new AbortController()
       this.upload = {
-        fileName: file.name,
+        fileName: file.name || 'file',
         fileId: '',
         progress: 0,
         stage: 'starting',
@@ -275,6 +275,7 @@ export const useDriveStore = defineStore('drive', {
         chunkCount: 0,
         error: '',
         done: false,
+        running: true,
       }
 
       try {
@@ -290,7 +291,7 @@ export const useDriveStore = defineStore('drive', {
             if (!this.upload) return
             if (event.type === 'start') {
               this.upload.fileId = event.fileId
-              this.upload.chunkCount = event.chunkCount
+              this.upload.chunkCount = event.chunkCount || 0
               this.upload.stage = 'encrypting & uploading'
             } else if (event.type === 'chunk-upload-progress') {
               this.upload.stage = `uploading chunk ${event.index + 1}/${this.upload.chunkCount || '?'}`
@@ -314,10 +315,12 @@ export const useDriveStore = defineStore('drive', {
         if (this.upload) {
           this.upload.error = errorMessage(error)
           this.upload.stage = 'failed'
+          this.upload.done = false
         }
         log('error', 'drive', 'Upload failed', error)
         throw error
       } finally {
+        if (this.upload) this.upload.running = false
         uploadAbort = null
       }
     },
@@ -327,7 +330,7 @@ export const useDriveStore = defineStore('drive', {
     },
 
     clearUpload() {
-      if (this.isUploading) return
+      if (uploadAbort) uploadAbort.abort()
       this.upload = null
     },
 
