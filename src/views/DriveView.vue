@@ -253,7 +253,8 @@ async function pasteClipboard() {
       manifests,
       targetTopicId: drive.selectedTopicId,
     })
-    if (clipboard.value?.mode === 'cut') clipboard.value = null
+    clipboard.value = null
+    drive.clearBatchTask()
     clearSelection()
   } catch (error) {
     actionError.value = drive.batchTask?.error || error.message
